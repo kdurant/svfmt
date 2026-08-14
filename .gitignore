@@ -1,0 +1,29 @@
+### basic
+*.pdf
+*.doc
+*.docx
+*.txt
+!CMakeLists.txt
+*.txt.user
+*.html
+*.jpg
+*.chm
+*.log
+*.xml
+*.lua_
+.cache
+.vscode
+.nvim
+.metals
+.idea
+tmp
+bin
+build
+
+*tmp.sv
+target
+
+
+# Added by cargo
+
+/target
