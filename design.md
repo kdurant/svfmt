@@ -70,10 +70,10 @@ Rust
 ├── tree-sitter
 ├── tree-sitter-systemverilog
 ├── serde
-├── serde_yaml
+├── toml
 └── clap
 
-配置格式优先使用 YAML。
+配置格式使用 TOML。
 
 例如：
 

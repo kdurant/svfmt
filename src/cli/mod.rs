@@ -8,7 +8,7 @@ use std::path::Path;
 use clap::Parser;
 
 use crate::cli::args::{Cli, Command, CstArgs};
-use crate::config::{FormatterConfig, dump_default_yaml, load_from_path};
+use crate::config::{FormatterConfig, dump_default_toml, load_from_path};
 use crate::formatter::Formatter;
 use crate::output::{PrintOptions, print_cst_to_string};
 use crate::parser::{SvParser, collect_error_nodes};
@@ -18,7 +18,7 @@ pub fn run() -> Result<(), CliError> {
     let cli = Cli::parse();
 
     if cli.dump_config {
-        print!("{}", dump_default_yaml());
+        print!("{}", dump_default_toml());
         return Ok(());
     }
 

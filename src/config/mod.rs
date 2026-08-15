@@ -1,7 +1,7 @@
 //! 配置层：Formatter 的所有行为都由 `FormatterConfig` 控制。
 //!
 //! 配置项定义与默认值参考 `verilog_format.md`。
-//! 支持 YAML / TOML 配置文件加载，并支持 `--dump-config` 导出默认配置。
+//! 支持 TOML 配置文件加载，并支持 `--dump-config` 导出默认配置。
 
 use std::path::Path;
 
@@ -286,31 +286,16 @@ impl Default for FormatterConfig {
     }
 }
 
-/// 加载配置文件（按扩展名选择 YAML / TOML）。
+/// 加载 TOML 格式的配置文件。
 pub fn load_from_path(path: &Path) -> Result<FormatterConfig, ConfigError> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| ConfigError::Read(path.display().to_string(), e))?;
-    let ext = path
-        .extension()
-        .map(|e| e.to_string_lossy().to_lowercase())
-        .unwrap_or_default();
-    match ext.as_str() {
-        "toml" => {
-            let cfg: FormatterConfig = toml::from_str(&text)
-                .map_err(|e| ConfigError::Parse("TOML".into(), e.to_string()))?;
-            Ok(cfg)
-        }
-        _ => {
-            let cfg: FormatterConfig = serde_yaml::from_str(&text)
-                .map_err(|e| ConfigError::Parse("YAML".into(), e.to_string()))?;
-            Ok(cfg)
-        }
-    }
+    toml::from_str(&text).map_err(|e| ConfigError::Parse("TOML".into(), e.to_string()))
 }
 
-/// 导出默认配置为 YAML 字符串。
-pub fn dump_default_yaml() -> String {
-    serde_yaml::to_string(&FormatterConfig::default()).expect("YAML 序列化不应失败")
+/// 导出默认配置为 TOML 字符串。
+pub fn dump_default_toml() -> String {
+    toml::to_string(&FormatterConfig::default()).expect("TOML 序列化不应失败")
 }
 
 /// 配置层错误。
@@ -344,17 +329,17 @@ mod tests {
 
     #[test]
     fn dump_and_reload_roundtrip() {
-        let yaml = dump_default_yaml();
-        let cfg: FormatterConfig = serde_yaml::from_str(&yaml).unwrap();
+        let toml_str = dump_default_toml();
+        let cfg: FormatterConfig = toml::from_str(&toml_str).unwrap();
         assert_eq!(cfg.indent_width, 4);
         assert!(cfg.space.around_binary_operator);
         assert!(!cfg.space.before_control_statement_parens);
     }
 
     #[test]
-    fn yaml_partial_config_uses_defaults() {
-        let yaml = "indent_width: 2\nspace:\n  after_at: true\n";
-        let cfg: FormatterConfig = serde_yaml::from_str(yaml).unwrap();
+    fn toml_partial_config_uses_defaults() {
+        let text = "indent_width = 2\n[space]\nafter_at = true\n";
+        let cfg: FormatterConfig = toml::from_str(text).unwrap();
         assert_eq!(cfg.indent_width, 2);
         assert!(cfg.space.after_at);
         assert!(cfg.space.around_binary_operator, "未指定项应使用默认值");
@@ -363,7 +348,7 @@ mod tests {
 
     #[test]
     fn toml_config_loads() {
-        let text = "indent_width = 2\nspace.after_at = true\n";
+        let text = "indent_width = 2\n[space]\nafter_at = true\n";
         let cfg: FormatterConfig = toml::from_str(text).unwrap();
         assert_eq!(cfg.indent_width, 2);
         assert!(cfg.space.after_at);
