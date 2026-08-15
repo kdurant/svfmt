@@ -29,7 +29,7 @@
 module spi_master_core #
 (
     parameter int SYS_FREQ = 125_000_000,
-    parameter int SPI_FREQ = 1_000_000
+    parameter int FREQ     = 1_000_000
 )
 (
     input  wire          clk,

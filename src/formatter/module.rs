@@ -582,6 +582,12 @@ pub fn fmt_parameter_port_list(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
         .map(|(_, n, _)| display_width(n, f.cfg.tab_width as usize))
         .max()
         .unwrap_or(0);
+    // 参数 prefix 最大宽度（带宽度类型时 name 对齐到 max_prefix + 1）
+    let max_prefix_w = rows
+        .iter()
+        .map(|(p, _, _)| display_width(p, f.cfg.tab_width as usize))
+        .max()
+        .unwrap_or(0);
     // 生成参数行 + 注释事件
     let mut events: Vec<(bool, String, usize, usize)> = Vec::new();
     let mut pi = 0usize;
@@ -596,11 +602,19 @@ pub fn fmt_parameter_port_list(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                 let idx = pi;
                 pi += 1;
                 let is_last = idx + 1 == params.len();
+                // name 起始列：带宽度类型对齐到 max_prefix+1，否则 prefix+1
+                let prefix = &rows[idx].0;
+                let name_col = if prefix.contains('[') {
+                    max_prefix_w + 1
+                } else {
+                    display_width(prefix, f.cfg.tab_width as usize) + 1
+                };
                 let mut line = fmt_parameter_port_line(
                     f,
-                    &rows[idx].0,
+                    prefix,
                     &rows[idx].1,
                     &rows[idx].2,
+                    name_col,
                     name_max,
                     is_last,
                     has_comma[idx],
@@ -743,18 +757,26 @@ fn parameter_columns(f: &Formatter<'_>, node: CstNode<'_>) -> (String, Vec<Strin
 }
 
 /// 参数端口列表的每条参数行。
+#[allow(clippy::too_many_arguments)]
 fn fmt_parameter_port_line(
     f: &Formatter<'_>,
     prefix: &str,
     name: &str,
     value: &str,
+    name_col: usize,
     name_max: usize,
     is_last: bool,
     trailing_space: bool,
 ) -> String {
     let mut line = String::new();
     line.push_str(prefix);
-    line.push(' ');
+    // prefix 后补空格到 name 起始列
+    let cur = display_width(prefix, f.cfg.tab_width as usize);
+    if cur < name_col {
+        for _ in 0..(name_col - cur) {
+            line.push(' ');
+        }
+    }
     let mut cell = name.to_string();
     cell = pad_to(&cell, name_max + 1, f.cfg.tab_width as usize);
     line.push_str(&cell);
@@ -994,35 +1016,55 @@ pub fn fmt_cond_expression(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
 
 /// `=` 对齐段：localparam/assign/带初始化声明按赋值对齐。
 fn emit_eq_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs: &mut Vec<Doc>) {
-    let mut contents: Vec<String> = Vec::new();
-    let mut values: Vec<String> = Vec::new();
+    // 每行：kind、type_dim（decl 的类型+宽度）、name、value
+    let mut kinds: Vec<&'static str> = Vec::new();
+    let mut type_dims: Vec<String> = Vec::new();
+    let mut names: Vec<String> = Vec::new();
+    let mut values: Vec<Option<String>> = Vec::new();
     let mut is_comment: Vec<bool> = Vec::new();
-    let mut max_content = 0usize;
+    let mut max_type = 0usize;
     for node in seg {
         if node.is_named() && node.kind().ends_with("comment") {
-            contents.push(String::new());
-            values.push(String::new());
+            kinds.push("");
+            type_dims.push(String::new());
+            names.push(String::new());
+            values.push(None);
             is_comment.push(true);
             continue;
         }
-        let (content, value) = eq_columns(f, *node);
-        if std::env::var("SVDBG").is_ok() {
-            eprintln!(
-                "[eq-cols] kind={} content={:?} value={:?}",
-                node.kind(),
-                content,
-                value
-            );
+        let (kind, type_dim, name, value) = eq_columns(f, *node);
+        if kind == "decl" {
+            let w = display_width(&type_dim, f.cfg.tab_width as usize);
+            if w > max_type {
+                max_type = w;
+            }
         }
-        let w = display_width(&content, f.cfg.tab_width as usize);
-        if w > max_content {
-            max_content = w;
-        }
-        contents.push(content);
+        kinds.push(kind);
+        type_dims.push(type_dim);
+        names.push(name);
         values.push(value);
         is_comment.push(false);
     }
-    let op_col = max_content + 1;
+    // 计算每行左列宽度，找最大
+    let mut left_widths: Vec<usize> = Vec::new();
+    let mut max_left = 0usize;
+    for i in 0..seg.len() {
+        if is_comment[i] || values[i].is_none() {
+            left_widths.push(0);
+            continue;
+        }
+        let w = match kinds[i] {
+            "decl" => max_type + 1 + display_width(&names[i], f.cfg.tab_width as usize),
+            "assign" => display_width(&type_dims[i], f.cfg.tab_width as usize),
+            _ => display_width(&type_dims[i], f.cfg.tab_width as usize)
+                + 1
+                + display_width(&names[i], f.cfg.tab_width as usize),
+        };
+        if w > max_left {
+            max_left = w;
+        }
+        left_widths.push(w);
+    }
     // 生成行
     let mut lines: Vec<String> = Vec::new();
     let mut current: Option<String> = None;
@@ -1034,7 +1076,7 @@ fn emit_eq_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs: &mut Vec<Doc>) 
                 .unwrap_or("");
             if let Some(l) = current.take() {
                 if !ws.contains('\n') {
-                    lines.push(pad_comment(f, &l, node.text(), 0, max_content));
+                    lines.push(pad_comment(f, &l, node.text(), 0, max_left));
                 } else {
                     lines.push(l);
                     lines.push(node.text().to_string());
@@ -1046,13 +1088,39 @@ fn emit_eq_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs: &mut Vec<Doc>) 
             if let Some(l) = current.take() {
                 lines.push(l);
             }
-            let mut line = pad_to(&contents[i], op_col, f.cfg.tab_width as usize);
-            line.push('=');
-            if !values[i].is_empty() {
-                line.push(' ');
-                line.push_str(&values[i]);
-            }
-            line.push(';');
+            // 左列
+            let left = match kinds[i] {
+                "decl" => {
+                    let mut l = pad_to(&type_dims[i], max_type, f.cfg.tab_width as usize);
+                    l.push(' ');
+                    l.push_str(&names[i]);
+                    l
+                }
+                _ => {
+                    let mut l = type_dims[i].clone();
+                    if !names[i].is_empty() {
+                        l.push(' ');
+                        l.push_str(&names[i]);
+                    }
+                    l
+                }
+            };
+            let line = if let Some(v) = &values[i] {
+                let mut l = pad_to(&left, max_left, f.cfg.tab_width as usize);
+                l.push(' ');
+                l.push('=');
+                if !v.is_empty() {
+                    l.push(' ');
+                    l.push_str(v);
+                }
+                l.push(';');
+                l
+            } else {
+                // 无初始化：原样
+                let mut l = left;
+                l.push(';');
+                l
+            };
             current = Some(line);
         }
         prev_end = Some(node.byte_range().end);
@@ -1068,31 +1136,38 @@ fn emit_eq_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs: &mut Vec<Doc>) 
     }
 }
 
-/// 提取 `=` 对齐的行内容与值。
-fn eq_columns(f: &Formatter<'_>, node: CstNode<'_>) -> (String, String) {
+/// 提取 `=` 对齐的行信息。
+/// 返回 (kind, type_dim, name, value)。value 为 None 表示无 `=`（无初始化）。
+fn eq_columns(
+    f: &Formatter<'_>,
+    node: CstNode<'_>,
+) -> (&'static str, String, String, Option<String>) {
     match node.kind() {
         "data_declaration" | "net_declaration" => {
             let cols = declaration_columns(f, node);
             let mut name = cols[1].clone();
-            let mut value = String::new();
             if let Some(pos) = name.find('=') {
-                value = name[pos + 1..].trim().to_string();
+                let value = name[pos + 1..].trim().to_string();
                 name = name[..pos].trim().to_string();
+                ("decl", cols[0].clone(), name, Some(value))
+            } else {
+                // 无初始化：仍输出 `=`（空值），与其他行对齐
+                ("decl", cols[0].clone(), name, Some(String::new()))
             }
-            let content = format!("{} {}", cols[0], name).trim().to_string();
-            (content, value)
         }
         "local_parameter_declaration" | "parameter_declaration" => {
             let (prefix, cols) = parameter_columns(f, node);
-            (
-                format!("{prefix} {}", cols[0]).trim().to_string(),
-                cols[1].clone(),
-            )
+            ("param", prefix, cols[0].clone(), Some(cols[1].clone()))
         }
         "continuous_assign" => {
             let cols = assign_columns(f, node);
-            (format!("assign {}", cols[0]), cols[2].clone())
+            (
+                "assign",
+                format!("assign {}", cols[0]),
+                String::new(),
+                Some(cols[2].clone()),
+            )
         }
-        _ => (node.text().to_string(), String::new()),
+        _ => ("", node.text().to_string(), String::new(), None),
     }
 }
