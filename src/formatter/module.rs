@@ -1,6 +1,6 @@
 //! 模块布局：module 声明、参数列表、端口列表、模块体。
 
-use crate::document::{render, Doc, RenderOptions};
+use crate::document::{Doc, RenderOptions, render};
 use crate::formatter::alignment::{align_rows, pad_to};
 use crate::formatter::expressions::{ExprCtx, fmt_expr};
 use crate::formatter::tokens::{display_width, has_newline, leaf_tokens};
@@ -1141,9 +1141,11 @@ fn emit_eq_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs: &mut Vec<Doc>) 
         let w = match kinds[i] {
             "decl" => max_type + 1 + display_width(&names[i], f.cfg.tab_width as usize),
             "assign" => display_width(&type_dims[i], f.cfg.tab_width as usize),
-            _ => display_width(&type_dims[i], f.cfg.tab_width as usize)
-                + 1
-                + display_width(&names[i], f.cfg.tab_width as usize),
+            _ => {
+                display_width(&type_dims[i], f.cfg.tab_width as usize)
+                    + 1
+                    + display_width(&names[i], f.cfg.tab_width as usize)
+            }
         };
         if w > max_left {
             max_left = w;
