@@ -37,6 +37,10 @@ module spi_master_core #
 
     if_axi_stream.slave        axis_slave,
     if_axi_stream.master       axis_master,
+    
+    input  [7:0]      gps_m_axis_tdata,
+    output reg [31:0] gps_week,
+    output reg [63:0] gps_second,
 
     inout  wire                mosi,    // SIO0
     inout  wire                miso,    // SIO1

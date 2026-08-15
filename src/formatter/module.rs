@@ -826,43 +826,69 @@ fn fmt_port_declarations(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
         .filter(|c| c.kind() == "ansi_port_declaration")
         .copied()
         .collect();
-    // 每行：方向、类型+dim、名字
-    let mut parsed: Vec<(bool, String, String, String)> = Vec::new(); // (is_interface, dir, type_dim, name)
+    // 每行：方向、类型关键字、宽度、名字（接口无方向，类型即接口名）
+    let mut parsed: Vec<(bool, String, String, String, String)> = Vec::new(); // (is_interface, dir, type_kw, width, name)
+    let tw = f.cfg.tab_width as usize;
     for p in &ports {
-        parsed.push(port_columns(f, *p));
+        let (is_if, dir, type_dim, name) = port_columns(f, *p);
+        let (type_kw, width) = split_type_width(&type_dim);
+        parsed.push((is_if, dir, type_kw, width, name));
     }
-    // 端口名列：普通 = 方向7 + 类型宽 + 1；接口 = 类型宽 + 1
+    // 宽度列：存在“类型+宽度”端口时，无类型端口的宽度对齐到 类型列 + 最长类型关键字 + 1
     let dir_col = 7usize;
+    let mut width_col = dir_col;
+    for (is_if, _, type_kw, width, _) in &parsed {
+        if !is_if && !type_kw.is_empty() && !width.is_empty() {
+            let w = dir_col + display_width(type_kw, tw) + 1;
+            if w > width_col {
+                width_col = w;
+            }
+        }
+    }
+    // 端口名列：普通 = 方向7 + 类型区宽 + 1；接口 = 类型宽 + 1
     let mut name_col = 0usize;
-    for (is_if, _, type_dim, _) in &parsed {
+    for (is_if, _, type_kw, width, _) in &parsed {
         let total = if *is_if {
-            display_width(type_dim, f.cfg.tab_width as usize) + 1
+            display_width(type_kw, tw) + 1
+        } else if !type_kw.is_empty() {
+            dir_col + display_width(&combine_type(type_kw, width), tw) + 1
         } else {
-            dir_col + display_width(type_dim, f.cfg.tab_width as usize) + 1
+            width_col + display_width(width, tw) + 1
         };
         if total > name_col {
             name_col = total;
         }
     }
     let mut lines: Vec<String> = Vec::new();
-    for (is_if, dir, type_dim, name) in &parsed {
+    for (is_if, dir, type_kw, width, name) in &parsed {
         let mut line = String::new();
         if *is_if {
-            let t = pad_to(type_dim, name_col, f.cfg.tab_width as usize);
+            let t = pad_to(type_kw, name_col, tw);
             line.push_str(&t);
         } else if f.cfg.module.port_alignment {
-            let d = pad_to(dir, dir_col, f.cfg.tab_width as usize);
+            let d = pad_to(dir, dir_col, tw);
             line.push_str(&d);
-            let t = pad_to(type_dim, name_col - dir_col, f.cfg.tab_width as usize);
-            line.push_str(&t);
+            if type_kw.is_empty() {
+                // 无类型关键字：宽度对齐到宽度列
+                let mut tmp = String::new();
+                for _ in 0..width_col.saturating_sub(dir_col) {
+                    tmp.push(' ');
+                }
+                tmp.push_str(width);
+                line.push_str(&pad_to(&tmp, name_col - dir_col, tw));
+            } else {
+                let t = pad_to(&combine_type(type_kw, width), name_col - dir_col, tw);
+                line.push_str(&t);
+            }
         } else {
             // 关闭对齐：单空格分隔
+            let combined = combine_type(type_kw, width);
             if !dir.is_empty() {
                 line.push_str(dir);
                 line.push(' ');
             }
-            if !type_dim.is_empty() {
-                line.push_str(type_dim);
+            if !combined.is_empty() {
+                line.push_str(&combined);
                 line.push(' ');
             }
         }
@@ -954,6 +980,27 @@ fn fmt_port_declarations(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
         first = false;
     }
     Doc::concat(docs)
+}
+
+/// 拆分类型与宽度：`reg [31:0]` → (`reg`, `[31:0]`)；`[7:0]` → (``, `[7:0]`)。
+fn split_type_width(type_dim: &str) -> (String, String) {
+    if let Some(pos) = type_dim.find('[') {
+        let t = type_dim[..pos].trim_end().to_string();
+        (t, type_dim[pos..].to_string())
+    } else {
+        (type_dim.to_string(), String::new())
+    }
+}
+
+/// 合并类型关键字与宽度为展示用字符串。
+fn combine_type(type_kw: &str, width: &str) -> String {
+    if width.is_empty() {
+        type_kw.to_string()
+    } else if type_kw.is_empty() {
+        width.to_string()
+    } else {
+        format!("{type_kw} {width}")
+    }
 }
 
 /// 端口行列：方向、类型+dim、名字(+unpacked)。
