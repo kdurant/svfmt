@@ -61,12 +61,6 @@ svfmt top.sv --in-place
 cat top.sv | svfmt - > formatted.sv
 ```
 
-### 与期望结果对比
-
-```bash
-svfmt top.sv -o /tmp/out.sv && diff /tmp/out.sv top_expected.sv
-```
-
 ## 命令行选项
 
 ```
