@@ -40,7 +40,7 @@ module spi_master_core #
 
     inout  wire                mosi,    // SIO0
     inout  wire                miso,    // SIO1
-    inout  wire                wp,      // SIO2
+    inout  wire                wp,            // SIO2
     inout  wire                sio3,    // SIO3
     output logic               sclk,
     output logic               scs

@@ -324,6 +324,7 @@ svfmt --dump-config
 
 ./target/release/svfmt examples/core.sv -o examples/core_tmp.sv && diff -b examples/core_tmp.sv examples/core_expected.sv 
 ./target/release/svfmt examples/hdmi.sv -o examples/hdmi_tmp.sv && diff -b examples/hdmi_tmp.sv examples/hdmi_expected.sv 
+./target/release/svfmt examples/taxi.sv -o examples/taxi_tmp.sv && diff examples/taxi_tmp.sv examples/taxi_expected.sv 
 
 ./target/release/svfmt examples/test1.sv -o examples/test1_tmp.sv && diff -b examples/test1_tmp.sv examples/test1_expected.sv 
 

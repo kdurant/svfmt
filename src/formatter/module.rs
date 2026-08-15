@@ -631,12 +631,13 @@ pub fn fmt_parameter_port_list(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                 let idx = pi;
                 pi += 1;
                 let is_last = idx + 1 == params.len();
-                // name 起始列：带宽度类型对齐到 max_prefix+1，否则 prefix+1
+                // name 起始列：无类型参数（`parameter NAME`）对齐到 max_prefix+1，带类型参数从 prefix+1
                 let prefix = &rows[idx].0;
-                let name_col = if prefix.contains('[') {
-                    max_prefix_w + 1
-                } else {
+                let is_typed = prefix.trim() != "parameter";
+                let name_col = if is_typed {
                     display_width(prefix, f.cfg.tab_width as usize) + 1
+                } else {
+                    max_prefix_w + 1
                 };
                 let mut line = fmt_parameter_port_line(
                     f,
