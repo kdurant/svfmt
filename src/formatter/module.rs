@@ -634,10 +634,11 @@ pub fn fmt_parameter_port_list(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                 // name 起始列：无类型参数（`parameter NAME`）对齐到 max_prefix+1，带类型参数从 prefix+1
                 let prefix = &rows[idx].0;
                 let is_typed = prefix.trim() != "parameter";
-                let name_col = if is_typed {
-                    display_width(prefix, f.cfg.tab_width as usize) + 1
-                } else {
+                // 带宽度类型（含 `[`）或无类型参数对齐到 max_prefix+1，带类型参数从 prefix+1
+                let name_col = if prefix.contains('[') || !is_typed {
                     max_prefix_w + 1
+                } else {
+                    display_width(prefix, f.cfg.tab_width as usize) + 1
                 };
                 let mut line = fmt_parameter_port_line(
                     f,
