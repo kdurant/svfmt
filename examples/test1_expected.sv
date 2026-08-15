@@ -229,6 +229,10 @@ generate
     end
 endgenerate
 
+/*
+ * 需要响应给spi_master 读的数据
+ */
+
 reg rst = 0;
 initial
 begin

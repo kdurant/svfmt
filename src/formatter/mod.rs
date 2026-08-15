@@ -60,6 +60,60 @@ impl<'a> Formatter<'a> {
         Doc::text(node.text())
     }
 
+    /// 注释输出。
+    ///
+    /// 多行块注释（`/* ... */`）：`*` 标记风格（如 `/*\n * ...\n */`）的内部行
+    /// 对齐到注释起始列 + 1（剥掉公共前导空白后补 1 空格）；普通文本注释原样保留。
+    /// 单行注释原样输出。
+    pub fn fmt_comment(&self, node: CstNode<'_>) -> Doc {
+        Doc::text(self.comment_text(node))
+    }
+
+    /// 归一化注释文本。
+    ///
+    /// 多行块注释（`/* ... */`）：`*` 标记风格（如 `/*\n * ...\n */`）的内部 `*`
+    /// 行对齐到注释起始列 + 1（剥掉公共前导空白后补 1 空格），普通文本注释保留
+    /// 内部行原样（不含起始列空白）；单行注释原样返回。
+    pub fn comment_text(&self, node: CstNode<'_>) -> String {
+        let text = node.text();
+        let is_block = text.contains("/*") && text.contains("*/") && text.contains('\n');
+        if !is_block {
+            return text.to_string();
+        }
+        let lines: Vec<&str> = text.split('\n').collect();
+        // 内部行（跳过首行）的公共前导空白数
+        let common = lines
+            .iter()
+            .skip(1)
+            .map(|l| l.len() - l.trim_start().len())
+            .min()
+            .unwrap_or(0);
+        // 是否为 `*` 标记风格：首个内部行剥掉公共缩进后以 `*` 开头
+        let star_style = lines
+            .iter()
+            .skip(1)
+            .next()
+            .map(|l| l[common.min(l.len())..].trim_start().starts_with('*'))
+            .unwrap_or(false);
+        let mut out = String::new();
+        for (i, line) in lines.iter().enumerate() {
+            if i > 0 {
+                out.push('\n');
+                let stripped = &line[common.min(line.len())..];
+                if star_style && stripped.trim_start().starts_with('*') {
+                    // `*` 标记行：补 1 空格使 `*` 对齐到 `/*` 列 + 1
+                    out.push(' ');
+                    out.push_str(stripped.trim_start());
+                } else {
+                    out.push_str(stripped);
+                }
+            } else {
+                out.push_str(line);
+            }
+        }
+        out
+    }
+
     /// 原文空白：从 `start` 到 `end`。
     pub fn ws(&self, start: usize, end: usize) -> &str {
         if end <= start || start >= self.src.len() {
@@ -158,7 +212,7 @@ impl<'a> Formatter<'a> {
             | "net_assignment" => {
                 expressions::fmt_expr(self, node, &expressions::ExprCtx::default())
             }
-            _ if node.kind().ends_with("comment") => self.raw(node),
+            _ if node.kind().ends_with("comment") => self.fmt_comment(node),
             _ if node.kind().ends_with("compiler_directive")
                 || node.kind().ends_with("directive") =>
             {

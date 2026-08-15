@@ -331,10 +331,10 @@ fn emit_aligned_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs: &mut Vec<D
                     lines.push(pad_comment(f, &l, node.text(), 0, block_max_semi));
                 } else {
                     lines.push(l);
-                    lines.push(node.text().to_string());
+                    lines.push(f.comment_text(*node));
                 }
             } else {
-                lines.push(node.text().to_string());
+                lines.push(f.comment_text(*node));
             }
         }
         prev_end = Some(node.byte_range().end);
@@ -679,7 +679,7 @@ pub fn fmt_parameter_port_list(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                         events.push((true, line, s, e));
                         events.push((
                             false,
-                            item.text().to_string(),
+                            f.comment_text(*item),
                             cmt_start,
                             item.byte_range().end,
                         ));
@@ -687,7 +687,7 @@ pub fn fmt_parameter_port_list(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                 } else {
                     events.push((
                         false,
-                        item.text().to_string(),
+                        f.comment_text(*item),
                         cmt_start,
                         item.byte_range().end,
                     ));
@@ -941,7 +941,7 @@ fn fmt_port_declarations(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                         events.push((true, line, s, e));
                         events.push((
                             false,
-                            item.text().to_string(),
+                            f.comment_text(*item),
                             cmt_start,
                             item.byte_range().end,
                         ));
@@ -949,7 +949,7 @@ fn fmt_port_declarations(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                 } else {
                     events.push((
                         false,
-                        item.text().to_string(),
+                        f.comment_text(*item),
                         cmt_start,
                         item.byte_range().end,
                     ));
@@ -1205,10 +1205,10 @@ fn emit_eq_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs: &mut Vec<Doc>) 
                     lines.push(pad_comment(f, &l, node.text(), 0, max_left));
                 } else {
                     lines.push(l);
-                    lines.push(node.text().to_string());
+                    lines.push(f.comment_text(*node));
                 }
             } else {
-                lines.push(node.text().to_string());
+                lines.push(f.comment_text(*node));
             }
         } else {
             if let Some(l) = current.take() {

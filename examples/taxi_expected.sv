@@ -27,37 +27,37 @@ module taxi_axis_gmii_rx #
     input  wire logic                rst,
 
     /*
-         * GMII input
-         */
+     * GMII input
+     */
     input  wire logic [DATA_W-1:0]   gmii_rxd,
     input  wire logic                gmii_rx_dv,
     input  wire logic                gmii_rx_er,
 
     /*
-         * Receive interface (AXI stream)
-         */
+     * Receive interface (AXI stream)
+     */
     taxi_axis_if.src                 m_axis_rx,
 
     /*
-         * PTP
-         */
+     * PTP
+     */
     input  wire logic [PTP_TS_W-1:0] ptp_ts,
 
     /*
-         * Control
-         */
+     * Control
+     */
     input  wire logic                clk_enable,
     input  wire logic                mii_select,
 
     /*
-         * Configuration
-         */
+     * Configuration
+     */
     input  wire logic [15:0]         cfg_rx_max_pkt_len = 16'd1518-1,
     input  wire logic                cfg_rx_enable,
 
     /*
-         * Status
-         */
+     * Status
+     */
     output wire logic                rx_start_packet,
     output wire logic                stat_rx_byte,
     output wire logic [15:0]         stat_rx_pkt_len,

@@ -280,7 +280,8 @@ fn fmt_seq_block_body(f: &Formatter<'_>, body_nodes: &[CstNode<'_>]) -> Vec<Doc>
                 if !first {
                     docs.push(Doc::Newline);
                 }
-                docs.push(Doc::text(node.text().to_string()));
+                // 独立注释：经 fmt 分派（块注释会规整内部缩进）
+                docs.push(f.fmt(*node));
             }
         } else {
             // 延时语句且 delay_on_same_line：与上一赋值同行（无换行）时合并到前一行末尾
@@ -412,10 +413,10 @@ fn emit_assign_segment(
                     ));
                 } else {
                     lines.push(l);
-                    lines.push(node.text().to_string());
+                    lines.push(f.comment_text(*node));
                 }
             } else {
-                lines.push(node.text().to_string());
+                lines.push(f.comment_text(*node));
             }
         } else {
             if let Some(l) = current.take() {
@@ -965,10 +966,10 @@ pub fn fmt_case_statement(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                     out_texts.push(Some(padded));
                 } else {
                     out_texts.push(Some(l));
-                    out_texts.push(Some(cmt_text.to_string()));
+                    out_texts.push(Some(f.comment_text(*c)));
                 }
             } else {
-                out_texts.push(Some(c.text().to_string()));
+                out_texts.push(Some(f.comment_text(*c)));
             }
         }
     }
