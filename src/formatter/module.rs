@@ -581,6 +581,10 @@ pub fn fmt_module_header(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
 
 /// parameter_port_list：`#(...)`。
 pub fn fmt_parameter_port_list(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
+    // align_parameters 关闭时：保持原样，不做列对齐
+    if !f.cfg.module.align_parameters {
+        return Doc::text(node.text().trim_end().to_string());
+    }
     let mut docs: Vec<Doc> = Vec::new();
     let items: Vec<CstNode<'_>> = node.children();
     // `#` 与 `(`
