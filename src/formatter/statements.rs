@@ -293,10 +293,7 @@ fn fmt_seq_block_body(f: &Formatter<'_>, body_nodes: &[CstNode<'_>]) -> Vec<Doc>
                     .unwrap_or(false);
             if adjacent_delay {
                 if !docs.is_empty()
-                    && !matches!(
-                        docs.last(),
-                        Some(Doc::Newline) | Some(Doc::BlankLines(_))
-                    )
+                    && !matches!(docs.last(), Some(Doc::Newline) | Some(Doc::BlankLines(_)))
                 {
                     docs.push(Doc::Newline);
                 }
@@ -309,8 +306,7 @@ fn fmt_seq_block_body(f: &Formatter<'_>, body_nodes: &[CstNode<'_>]) -> Vec<Doc>
                 if !first && !blank_before {
                     let ws = f.ws(prev_end.unwrap(), node.byte_range().start);
                     // delay_on_same_line=false 时独立延时强制换行（不残留前导空格）
-                    if has_newline(ws) || (is_delay_stmt(f, *node) && !f.cfg.delay_on_same_line)
-                    {
+                    if has_newline(ws) || (is_delay_stmt(f, *node) && !f.cfg.delay_on_same_line) {
                         let blanks = crate::formatter::count_blank_lines(ws);
                         if blanks > 0 {
                             docs.push(Doc::BlankLines(blanks));
@@ -337,10 +333,7 @@ fn is_delay_stmt(f: &Formatter<'_>, node: CstNode<'_>) -> bool {
     if inner.kind() != "procedural_timing_control_statement" {
         return false;
     }
-    inner
-        .children()
-        .iter()
-        .any(|c| c.kind() == "delay_control")
+    inner.children().iter().any(|c| c.kind() == "delay_control")
 }
 
 /// 输出赋值对齐组。

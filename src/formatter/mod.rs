@@ -214,6 +214,14 @@ impl<'a> Formatter<'a> {
     /// 解开包装取实际语句，并补回语句末尾的 `;`。
     fn fmt_statement(&self, node: CstNode<'_>) -> Doc {
         let inner = statements::unwrap_statement(self, node);
+        // unwrap 未取得进展（如空语句 `;` 的 statement_or_null，仅含 unnamed 子节点）
+        // 时原样输出，避免 self.fmt(inner) 无限递归（栈溢出）。
+        if inner.kind() == node.kind()
+            && inner.byte_range().start == node.byte_range().start
+            && inner.byte_range().end == node.byte_range().end
+        {
+            return self.raw(node);
+        }
         let mut doc = self.fmt(inner);
         // 结构语句（if/case/for/begin 等）自身不带 `;`
         let no_semi = matches!(

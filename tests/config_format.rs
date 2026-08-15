@@ -317,6 +317,14 @@ fn case_trailing_comments_align() {
 }
 
 #[test]
+fn empty_case_item_body() {
+    // `default:;`（空 case 体，仅含 `;` 的 statement_or_null）不应导致栈溢出
+    let src = "module t;\nalways @ (posedge clk)\nbegin\n    case (x)\n        2'b00: a <= 1;\n        default:;\n    endcase\nend\nendmodule\n";
+    let out = fmt(src, &default_cfg());
+    assert!(out.contains("default"), "空 case 体应正常输出: {out}");
+}
+
+#[test]
 fn if_else_chain_comments_align() {
     // if/else 链：if 体语句与 else if 行是连续单行注释 → 对齐；
     // else 行是孤立注释 → 保持自然位置
