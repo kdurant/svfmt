@@ -249,7 +249,13 @@ fn aligned_connections(
     if conns.is_empty() {
         return Doc::Nil;
     }
-    let inner = f.cfg.space_inside_instance_port_parens as usize;
+    // align_instance_ports 关闭时：紧凑输出（.name(value)，不做列对齐、无括号内空格）
+    let align = f.cfg.align_instance_ports;
+    let inner = if align {
+        f.cfg.space_inside_instance_port_parens as usize
+    } else {
+        0
+    };
     let mut parsed: Vec<(String, String)> = Vec::new();
     for c in conns {
         let (name, value) = connection_columns(f, *c);
@@ -286,11 +292,19 @@ fn aligned_connections(
         }
         let (name, value) = &parsed[pi];
         let mut line = String::new();
-        line.push_str(&pad_col(name, name_max + 1));
+        if align {
+            line.push_str(&pad_col(name, name_max + 1));
+        } else {
+            line.push_str(name);
+        }
         line.push('(');
-        line.push_str(&" ".repeat(inner));
-        line.push_str(&pad_col(value, value_max + value_pad_extra));
-        line.push_str(&" ".repeat(inner));
+        if align {
+            line.push_str(&" ".repeat(inner));
+            line.push_str(&pad_col(value, value_max + value_pad_extra));
+            line.push_str(&" ".repeat(inner));
+        } else {
+            line.push_str(value);
+        }
         line.push(')');
         let has_comma = pi + 1 < parsed.len() || c.text().trim_end().ends_with(',');
         if has_comma {

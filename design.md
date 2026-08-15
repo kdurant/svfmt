@@ -317,20 +317,33 @@ svfmt --dump-config
 ---
 
 # 测试
+
+示例 golden 测试统一由脚本执行：
+
 ```bash
-./target/release/svfmt examples/alu.sv -o examples/alu_tmp.sv && diff examples/alu_tmp.sv examples/alu_expected.sv 
-./target/release/svfmt examples/bsg.sv -o examples/bsg_tmp.sv && diff examples/bsg_tmp.sv examples/bsg_expected.sv 
+./tests/run_examples.sh
+```
 
-./target/release/svfmt examples/controller.sv -o examples/controller_tmp.sv && diff -b examples/controller_tmp.sv examples/controller_expected.sv 
+脚本对 `examples/` 下每个有 `*_expected.sv` 的输入文件运行 `svfmt` 并与期望输出对比，汇总 PASS/FAIL，任一失败退出码非 0。
 
-./target/release/svfmt examples/core.sv -o examples/core_tmp.sv && diff examples/core_tmp.sv examples/core_expected.sv 
-./target/release/svfmt examples/hdmi.sv -o examples/hdmi_tmp.sv && diff examples/hdmi_tmp.sv examples/hdmi_expected.sv 
-./target/release/svfmt examples/taxi.sv -o examples/taxi_tmp.sv && diff examples/taxi_tmp.sv examples/taxi_expected.sv 
+可选：只运行部分示例（按文件名，不含扩展名）：
 
-./target/release/svfmt examples/test1.sv -o examples/test1_tmp.sv && diff examples/test1_tmp.sv examples/test1_expected.sv 
+```bash
+./tests/run_examples.sh test1 bsg
+```
 
-./target/release/svfmt examples/test2.sv -o examples/test2_tmp.sv && diff examples/test2_tmp.sv examples/test2_expected.sv 
-./target/release/svfmt examples/test3.sv -o examples/test3_tmp.sv && diff examples/test3_tmp.sv examples/test3_expected.sv 
+等价于以下逐条命令（脚本会统一处理、输出汇总）：
+
+```bash
+./target/release/svfmt examples/alu.sv -o /tmp/alu_tmp.sv && diff /tmp/alu_tmp.sv examples/alu_expected.sv
+./target/release/svfmt examples/bsg.sv -o /tmp/bsg_tmp.sv && diff /tmp/bsg_tmp.sv examples/bsg_expected.sv
+./target/release/svfmt examples/controller.sv -o /tmp/controller_tmp.sv && diff /tmp/controller_tmp.sv examples/controller_expected.sv
+./target/release/svfmt examples/core.sv -o /tmp/core_tmp.sv && diff /tmp/core_tmp.sv examples/core_expected.sv
+./target/release/svfmt examples/hdmi.sv -o /tmp/hdmi_tmp.sv && diff /tmp/hdmi_tmp.sv examples/hdmi_expected.sv
+./target/release/svfmt examples/taxi.sv -o /tmp/taxi_tmp.sv && diff /tmp/taxi_tmp.sv examples/taxi_expected.sv
+./target/release/svfmt examples/test1.sv -o /tmp/test1_tmp.sv && diff /tmp/test1_tmp.sv examples/test1_expected.sv
+./target/release/svfmt examples/test2.sv -o /tmp/test2_tmp.sv && diff /tmp/test2_tmp.sv examples/test2_expected.sv
+./target/release/svfmt examples/test3.sv -o /tmp/test3_tmp.sv && diff /tmp/test3_tmp.sv examples/test3_expected.sv
 ```
 
 

@@ -397,15 +397,29 @@ fn one_line_interface_instantiation() {
 #[test]
 fn align_instance_ports() {
     let src = "module t;\nu_foo u ( .clk(clk), .long_port(data) );\nendmodule\n";
+    // 默认（true）：名称按列对齐 + 括号内侧补空格
+    let out_true = fmt(src, &default_cfg());
+    assert!(
+        out_true.contains(".clk       ("),
+        "开启时端口名按列对齐: {out_true}"
+    );
+    assert!(
+        out_true.contains("(  clk   )"),
+        "开启时括号内侧补空格: {out_true}"
+    );
+    // 关闭：紧凑输出（.name(value)，不对齐、无括号内空格）
     let mut cfg = default_cfg();
     cfg.align_instance_ports = false;
-    let out = fmt(src, &cfg);
-    assert!(!out.contains(".clk   ("), "关闭实例端口对齐: {out}");
-    let out2 = fmt(src, &default_cfg());
+    let out_false = fmt(src, &cfg);
     assert!(
-        out2.contains(".clk") && out2.contains("("),
-        "默认对齐实例端口"
+        out_false.contains(".clk(clk)") && out_false.contains(".long_port(data)"),
+        "关闭时紧凑输出: {out_false}"
     );
+    assert!(
+        !out_false.contains("(  clk"),
+        "关闭时无括号内空格: {out_false}"
+    );
+    assert_ne!(out_true, out_false, "align_instance_ports 开关应改变输出");
 }
 
 #[test]

@@ -126,12 +126,6 @@ pub struct FormatterConfig {
     /// 模块内部的第一级代码是否缩进一个 `indent_width`。
     #[serde(default = "default_false")]
     pub indent_module_contents: bool,
-    /// 超长语句续行的缩进空格数。
-    #[serde(default = "default_indent_width")]
-    pub continuation_indent_width: u32,
-    /// 超长行续行是否对齐到赋值表达式右侧第一个表达式的起始列。
-    #[serde(default = "default_true")]
-    pub align_continuation_lines: bool,
     /// 是否使用 Tab 进行缩进。
     #[serde(default = "default_false")]
     pub use_tab: bool,
@@ -209,9 +203,6 @@ pub struct FormatterConfig {
     /// `else` 是否另起一行。
     #[serde(default = "default_true")]
     pub else_on_newline: bool,
-    /// 是否在 `end` 后追加块标签。
-    #[serde(default = "default_false")]
-    pub end_block_labels: bool,
 
     /// 是否统一 case/casez/casex 风格。
     #[serde(default)]
@@ -254,8 +245,6 @@ impl Default for FormatterConfig {
         FormatterConfig {
             indent_width: 4,
             indent_module_contents: false,
-            continuation_indent_width: 4,
-            align_continuation_lines: true,
             use_tab: false,
             tab_width: 4,
             column_limit: 0,
@@ -279,7 +268,6 @@ impl Default for FormatterConfig {
             end_of_line_for_begin: false,
             end_on_newline: false,
             else_on_newline: true,
-            end_block_labels: false,
             reformat_case: ReformatCase::None,
             case_indent_level: 1,
         }
