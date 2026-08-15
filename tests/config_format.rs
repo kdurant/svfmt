@@ -63,6 +63,21 @@ fn use_tab_uses_tabs() {
     assert!(out.contains('\t'), "应使用 tab 缩进: {out:?}");
 }
 
+#[test]
+fn tab_width_affects_alignment() {
+    // tab_width 影响带 tab 缩进时的对齐计算（display_width 把 tab 计为 tab_width 列）
+    let src = "module t;\nalways @(posedge clk)\nbegin\n    aaa <= 1;\n    long_name <= 2;\nend\nendmodule\n";
+    let mut cfg2 = default_cfg();
+    cfg2.use_tab = true;
+    cfg2.tab_width = 2;
+    let out2 = fmt(src, &cfg2);
+    let mut cfg8 = default_cfg();
+    cfg8.use_tab = true;
+    cfg8.tab_width = 8;
+    let out8 = fmt(src, &cfg8);
+    assert_ne!(out2, out8, "不同 tab_width 应对齐到不同列");
+}
+
 // ---------- 行 ----------
 
 #[test]
@@ -83,6 +98,20 @@ fn space_after_comma() {
     assert!(after.contains("foo(a,b)"), "逗号后无空格: {after}");
     let out = fmt(src, &default_cfg());
     assert!(out.contains("foo(a, b)"), "逗号后有空格: {out}");
+}
+
+#[test]
+fn space_before_parens_in_function_call() {
+    let src = "module t;\nassign d = my_func(a, b);\nendmodule\n";
+    let (_, after) = assert_changes(src, |c| c.space.before_parens_in_function_call = true);
+    assert!(
+        after.contains("my_func (a, b)"),
+        "函数名与括号之间应空格: {after}"
+    );
+    assert!(
+        fmt(src, &default_cfg()).contains("my_func(a, b)"),
+        "默认函数名与括号间无空格"
+    );
 }
 
 #[test]
@@ -152,33 +181,63 @@ fn space_after_unary_operators() {
     assert!(out.contains("~ a"), "一元运算符后应空格: {out}");
 }
 
+#[test]
+fn space_before_colon() {
+    let src = "module t;\nassign y = sel ? a : b;\nendmodule\n";
+    let (_, after) = assert_changes(src, |c| c.space.before_colon = false);
+    assert!(after.contains("a: b"), "冒号前无空格: {after}");
+    assert!(
+        fmt(src, &default_cfg()).contains("a : b"),
+        "默认冒号前有空格"
+    );
+}
+
+#[test]
+fn space_after_colon() {
+    let src = "module t;\nassign y = sel ? a : b;\nendmodule\n";
+    let (_, after) = assert_changes(src, |c| c.space.after_colon = false);
+    assert!(after.contains("a :b"), "冒号后无空格: {after}");
+    assert!(
+        fmt(src, &default_cfg()).contains("a : b"),
+        "默认冒号后有空格"
+    );
+}
+
 // ---------- 空行 ----------
 
 #[test]
 fn max_consecutive_blank_lines_limits_blank_lines() {
-    let src = "module t;\nwire a;\n\n\nwire b;\nendmodule\n";
+    let src = "module t;\nwire a;\n\n\n\nwire b;\nendmodule\n";
     let mut cfg = default_cfg();
     cfg.max_consecutive_blank_lines = 0;
     let out = fmt(src, &cfg);
     assert!(!out.contains("\n\n"), "不应有空行: {out:?}");
     let out2 = fmt(src, &default_cfg());
     assert!(out2.contains("\n\n"), "默认保留 1 空行: {out2:?}");
+    cfg.max_consecutive_blank_lines = 2;
+    let out3 = fmt(src, &cfg);
+    assert!(out3.contains("\n\n\n"), "max=2 时保留 2 空行: {out3:?}");
 }
 
 #[test]
 fn blank_line_between_procedures() {
-    let src =
-        "module t;\nalways @(posedge clk) begin end\nalways @(posedge clk) begin end\nendmodule\n";
+    let src = "module t;\nalways @(posedge clk) begin a <= 1; end\nalways @(posedge clk) begin c <= 2; end\nendmodule\n";
+    // 默认 true：块间保留空行
+    let out_default = fmt(src, &default_cfg());
+    assert!(
+        out_default.contains("end\n\nalways"),
+        "默认块间保留空行: {out_default}"
+    );
+    // false：块间无空行
     let mut cfg = default_cfg();
     cfg.blank_line_between_procedures = false;
     let out = fmt(src, &cfg);
-    // 两个 always 之间应有空行
-    let body = out.split("endmodule").next().unwrap();
-    assert!(
-        body.contains("end\nalways"),
-        "块间应无空行（blank_line=false 未实现？）"
+    assert!(out.contains("end\nalways"), "关闭后块间无空行: {out}");
+    assert!(!out.contains("end\n\nalways"), "关闭后不应有空行: {out}");
+    assert_ne!(
+        out_default, out,
+        "blank_line_between_procedures 开关应改变输出"
     );
-    let _ = assert_changes(src, |c| c.blank_line_between_procedures = false);
 }
 
 // ---------- 注释 ----------
@@ -201,11 +260,25 @@ fn align_trailing_comments_off() {
     let mut cfg = default_cfg();
     cfg.align_trailing_comments = false;
     let out = fmt(src, &cfg);
-    // 关闭对齐后注释紧跟 2 空格
+    // 关闭对齐后注释紧跟 2 空格（默认 comment_indent）
     assert!(
         out.contains("a;  // one"),
         "关闭对齐用 comment_indent 空格: {out}"
     );
+}
+
+#[test]
+fn comment_indent_controls_spacing() {
+    let src = "module t;\nwire a; // c1\nendmodule\n";
+    let mut cfg = default_cfg();
+    cfg.align_trailing_comments = false;
+    cfg.comment_indent = 1;
+    let out1 = fmt(src, &cfg);
+    assert!(out1.contains("a; // c1"), "comment_indent=1: {out1}");
+    cfg.comment_indent = 4;
+    let out4 = fmt(src, &cfg);
+    assert!(out4.contains("a;    // c1"), "comment_indent=4: {out4}");
+    assert_ne!(out1, out4, "不同 comment_indent 应改变空格数");
 }
 
 // ---------- 对齐 ----------
@@ -240,11 +313,15 @@ fn case_indent_level() {
 
 #[test]
 fn reformat_case() {
-    let src = "module t;\nalways @(posedge clk) begin casex (a) 1'b1: b = 1; default: b = 0; endcase end\nendmodule\n";
+    let src = "module t;\nalways @(posedge clk) begin case (a) 1'b1: b = 1; default: b = 0; endcase end\nendmodule\n";
     let mut cfg = default_cfg();
     cfg.reformat_case = svfmt::config::ReformatCase::Casez;
-    let out = fmt(src, &cfg);
-    assert!(out.contains("casez"), "应统一为 casez: {out}");
+    let out_z = fmt(src, &cfg);
+    assert!(out_z.contains("casez"), "应统一为 casez: {out_z}");
+    cfg.reformat_case = svfmt::config::ReformatCase::Casex;
+    let out_x = fmt(src, &cfg);
+    assert!(out_x.contains("casex"), "应统一为 casex: {out_x}");
+    assert_ne!(out_z, out_x, "casez/casex 输出应不同");
 }
 
 // ---------- 模块 ----------
@@ -355,14 +432,15 @@ fn else_on_newline() {
 #[test]
 fn end_of_line_for_begin() {
     let src = "module t;\nalways @(posedge clk) begin b <= 1; end\nendmodule\n";
-    let mut cfg = default_cfg();
-    cfg.end_of_line_for_begin = true;
-    let out = fmt(src, &cfg);
+    let (out_default, out_true) = assert_changes(src, |c| c.end_of_line_for_begin = true);
     assert!(
-        out.contains("begin b <= 1;") || out.contains("begin\n    b <= 1;"),
-        "begin 后紧跟（或仍多行）"
+        out_true.contains("begin b <= 1;"),
+        "begin 后紧跟第一条语句: {out_true}"
     );
-    let _ = assert_changes(src, |c| c.end_of_line_for_begin = true);
+    assert!(
+        out_default.contains("posedge clk)\nbegin"),
+        "默认 begin 另起一行: {out_default}"
+    );
 }
 
 #[test]
@@ -395,6 +473,45 @@ fn one_line_interface_instantiation() {
 }
 
 #[test]
+fn instance_port_list_break_before_open_paren() {
+    let src = "module t;\nu_foo u ( .a(a) );\nendmodule\n";
+    let (out_true, out_false) = assert_changes(src, |c| {
+        c.module.instance_port_list_break_before_open_paren = false
+    });
+    assert!(
+        out_true.contains("u_foo u\n("),
+        "实例端口括号另起一行: {out_true}"
+    );
+    assert!(
+        out_false.contains("u_foo u("),
+        "实例端口括号紧跟: {out_false}"
+    );
+}
+
+#[test]
+fn newline_per_instance_port() {
+    let src = "module t;\nu_foo u ( .a(a), .b(b) );\nendmodule\n";
+    // 默认 true：每个连接单独一行
+    let out_true = fmt(src, &default_cfg());
+    assert!(
+        out_true.contains(".a (  a  ),") && !out_true.contains(".a (  a  ), .b"),
+        "默认每个连接一行: {out_true}"
+    );
+    // false：连接同行
+    let mut cfg = default_cfg();
+    cfg.module.newline_per_instance_port = false;
+    let out_false = fmt(src, &cfg);
+    assert!(
+        out_false.contains(".a (  a  ), .b (  b  )"),
+        "关闭后连接同行: {out_false}"
+    );
+    assert_ne!(
+        out_true, out_false,
+        "newline_per_instance_port 开关应改变输出"
+    );
+}
+
+#[test]
 fn align_instance_ports() {
     let src = "module t;\nu_foo u ( .clk(clk), .long_port(data) );\nendmodule\n";
     // 默认（true）：名称按列对齐 + 括号内侧补空格
@@ -423,6 +540,48 @@ fn align_instance_ports() {
 }
 
 #[test]
+fn interface_type_prefix() {
+    // 默认前缀 "if_"：if_ 开头 → 接口，压缩一行
+    let if_src = "module t;\nif_axi_stream #(.DATA_WIDTH(8)) fifo_if();\nendmodule\n";
+    let out_if = fmt(if_src, &default_cfg());
+    assert!(
+        out_if.contains("fifo_if();") && !out_if.contains("fifo_if\n"),
+        "if_ 开头按接口压缩一行: {out_if}"
+    );
+    // 非 if_ 开头 → 模块实例化，不压缩
+    let mod_src = "module t;\nmy_stream #(.DATA_WIDTH(8)) s();\nendmodule\n";
+    let out_mod = fmt(mod_src, &default_cfg());
+    assert!(
+        !out_mod.contains("s();"),
+        "默认前缀不匹配 my_stream: {out_mod}"
+    );
+    // 自定义前缀 my_ 后，my_stream 被识别为接口
+    let mut cfg = default_cfg();
+    cfg.interface_type_prefix = "my_".into();
+    let out_my = fmt(mod_src, &cfg);
+    assert!(
+        out_my.contains("s();") && !out_my.contains("s\n"),
+        "自定义前缀应识别 my_stream: {out_my}"
+    );
+}
+
+#[test]
+fn interface_type_suffix() {
+    // 默认后缀 "_if"：以 _if 结尾 → 接口，压缩一行
+    let src = "module t;\naxi_stream_if #(.DATA_WIDTH(8)) s();\nendmodule\n";
+    let out = fmt(src, &default_cfg());
+    assert!(
+        out.contains("s();") && !out.contains("s\n"),
+        "_if 结尾按接口压缩一行: {out}"
+    );
+    // 改后缀为不匹配的值 → 不再识别为接口
+    let mut cfg = default_cfg();
+    cfg.interface_type_suffix = "zz_".into();
+    let out2 = fmt(src, &cfg);
+    assert!(!out2.contains("s();"), "后缀不匹配时不应压缩: {out2}");
+}
+
+#[test]
 fn space_inside_instance_port_parens() {
     let src = "module t;\nu_foo u ( .clk(clk) );\nendmodule\n";
     let mut cfg = default_cfg();
@@ -436,12 +595,21 @@ fn space_inside_instance_port_parens() {
 #[test]
 fn wrap_instance_ports() {
     let src = "module t;\nu_foo u ( .a(a), .b(b), .c(c) );\nendmodule\n";
+    // wrap 阈值 >= 连接数：单行
     let mut cfg = default_cfg();
-    cfg.wrap_instance_ports = 4;
-    let out = fmt(src, &cfg);
-    // 端口少于 wrap 数量不强制换行（但默认 BreakBeforeOpenParen 仍换行）
-    let _ = out;
-    let _ = assert_changes(src, |c| c.wrap_instance_ports = 4);
+    cfg.wrap_instance_ports = 3;
+    let out_single = fmt(src, &cfg);
+    assert!(
+        out_single.contains(".a (  a  ), .b (  b  ), .c (  c  )"),
+        "wrap>=连接数时单行: {out_single}"
+    );
+    // 默认 wrap=1 < 连接数：多行
+    let out_multi = fmt(src, &default_cfg());
+    assert!(
+        out_multi.contains(".a (  a  ),\n"),
+        "wrap<连接数时多行: {out_multi}"
+    );
+    assert_ne!(out_single, out_multi, "wrap_instance_ports 阈值应改变输出");
 }
 
 // ---------- 对齐赋值 ----------
@@ -449,8 +617,13 @@ fn wrap_instance_ports() {
 #[test]
 fn align_assignments_toggle() {
     let src = "module t;\nalways @(posedge clk) begin\n    mem_read_valid <= 0;\n    mem_read_address <= 0;\nend\nendmodule\n";
-    let mut cfg = default_cfg();
-    cfg.align_assignments = false;
-    let out = fmt(src, &cfg);
-    assert!(out.contains("mem_read_valid <= 0;"), "关闭赋值对齐: {out}");
+    let (out_true, out_false) = assert_changes(src, |c| c.align_assignments = false);
+    assert!(
+        out_true.contains("mem_read_valid"),
+        "默认含左值: {out_true}"
+    );
+    assert!(
+        out_false.contains("mem_read_valid <= 0;"),
+        "关闭赋值对齐: {out_false}"
+    );
 }

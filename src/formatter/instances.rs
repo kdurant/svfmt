@@ -266,9 +266,11 @@ fn aligned_connections(
     }
     let name_max = shared_name_max;
     let value_max = shared_value_max;
-    // wrap_instance_ports：连接数不超过阈值时单行显示
+    // 单行条件：newline_per_instance_port=false 时强制单行；
+    // 否则按 wrap_instance_ports 阈值（连接数不超过阈值时单行）
     let wrap = f.cfg.wrap_instance_ports as usize;
-    let single_line = wrap >= 1 && parsed.len() <= wrap;
+    let single_line =
+        !f.cfg.module.newline_per_instance_port || (wrap >= 1 && parsed.len() <= wrap);
     if std::env::var("SVDBG").is_ok() {
         eprintln!(
             "[aligned2] name_max={} value_max={} extra={}",
