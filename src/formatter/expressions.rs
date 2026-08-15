@@ -260,6 +260,10 @@ pub fn token_sep(f: &Formatter<'_>, prev: Option<&Token>, cur: &Token, ctx: &Exp
             if ctx.in_packed_dim {
                 return Sep::None;
             }
+            // 三元表达式 `a : (b)` 冒号后括号不空格
+            if cur.kind == "(" {
+                return Sep::None;
+            }
             return if cfg.space.after_colon {
                 Sep::Space
             } else {
@@ -609,6 +613,12 @@ fn fmt_ternary(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
     let mut prev: Option<Token> = None;
     for child in node.children() {
         if child.is_named() {
+            if let Some(p) = prev
+                && let Some(tok) = first_token_of(child)
+            {
+                let sep = token_sep(f, Some(&p), &tok, ctx);
+                apply_sep(f, &mut docs, &p, &tok, sep);
+            }
             docs.push(fmt_expr(f, child, ctx));
             if let Some(t) = last_token_of(child) {
                 prev = Some(t);

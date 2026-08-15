@@ -22,6 +22,8 @@ fn all_example_files_parse_without_error() {
     // tree-sitter-systemverilog 按 IEEE 1800 严格语法将其解析为 ERROR。
     // EDA 工具（VCS/Questa）普遍宽容该写法。Formatter 阶段需按"支持 ERROR node"
     // 原则容忍并尽量原样输出，因此这里对该文件使用已知预期值。
+    // core.sv 的模块实例化参数列表含尾随逗号（源码固有语法，EDA 工具宽容，
+    // tree-sitter 严格解析报 ERROR）。
     let known_error_counts = [("core.sv", 2)];
 
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");

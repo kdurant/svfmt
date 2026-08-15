@@ -150,6 +150,10 @@ fn append_body_items(f: &Formatter<'_>, docs: &mut Vec<Doc>, body: &[CstNode<'_>
 
 fn is_alignable(node: CstNode<'_>) -> bool {
     if node.kind() == "data_declaration" || node.kind() == "net_declaration" {
+        // 含语法错误（ERROR）的声明：保留原文
+        if node.subtree_has_error() {
+            return false;
+        }
         // typedef 等类型声明不参与普通对齐（原样输出）
         if node
             .named_children()
@@ -401,6 +405,7 @@ fn declaration_columns(f: &Formatter<'_>, node: CstNode<'_>) -> Vec<String> {
             || kind == "signing"
             || kind == "packed_dimension"
             || kind == "integer_type"
+            || kind == "simple_identifier"
             || kind == "simple_type"
             || kind == "type_reference"
             || kind == "variable_type"
