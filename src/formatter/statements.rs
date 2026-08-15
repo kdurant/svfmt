@@ -39,10 +39,11 @@ pub fn fmt_procedural_construct(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
         idx = 1;
     }
     // 剩余：event_control 与/或 statement（body）
+    // 注意：`initial begin ...` 的 body 是 statement_or_null（而非 statement），需一并识别
     let mut body: Option<CstNode<'_>> = None;
     while idx < children.len() {
         let c = children[idx];
-        if c.is_named() && c.kind() == "statement" {
+        if c.is_named() && (c.kind() == "statement" || c.kind() == "statement_or_null") {
             body = Some(c);
             break;
         }
@@ -69,13 +70,16 @@ pub fn fmt_procedural_construct(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                     break;
                 }
             }
+            // 延时控制：仅当构造有前置关键字（如 `always #5 ...`）时另起一行；
+            // 独立延时语句（如 seq 块内的 `#1us;`）无关键字，直接输出（由外层合并/换行）
+            let has_keyword = !docs.is_empty();
             for c in &sub {
                 if c.kind() == "event_control"
                     || c.kind() == "delay_control"
                     || c.kind() == "delay_value"
                 {
-                    if has_delay {
-                        // 延迟控制另起一行
+                    if has_delay && has_keyword {
+                        // 延迟控制另起一行（`always #5 ...`）
                         docs.push(Doc::Newline);
                         docs.push(Doc::Indent);
                     } else if !docs.is_empty() && !matches!(docs.last(), Some(Doc::Space)) {
@@ -92,9 +96,15 @@ pub fn fmt_procedural_construct(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                 let sb = unwrap_statement(f, s);
                 if has_delay {
                     // `#(...)` 延迟控制：语句体同行
-                    docs.push(Doc::Space);
+                    // 空语句体（如 `#1us;` 的 `;`）不加空格，直接跟分号
+                    let empty_body = sb.kind() == "statement_or_null";
+                    if !empty_body {
+                        docs.push(Doc::Space);
+                    }
                     docs.push(f.fmt(s));
-                    docs.push(Doc::Dedent);
+                    if has_keyword {
+                        docs.push(Doc::Dedent);
+                    }
                 } else {
                     if f.cfg.begin_end_on_newline {
                         docs.push(Doc::Newline);
@@ -214,7 +224,7 @@ fn fmt_seq_block_body(f: &Formatter<'_>, body_nodes: &[CstNode<'_>]) -> Vec<Doc>
         {
             docs.push(Doc::Newline);
         }
-        emit_assign_segment(f, seg, docs);
+        emit_assign_segment(f, seg, docs, true);
         seg.clear();
     };
 
@@ -273,21 +283,46 @@ fn fmt_seq_block_body(f: &Formatter<'_>, body_nodes: &[CstNode<'_>]) -> Vec<Doc>
                 docs.push(Doc::text(node.text().to_string()));
             }
         } else {
-            flush(&mut docs, &mut seg);
-            if !first && !blank_before {
-                let ws = f.ws(prev_end.unwrap(), node.byte_range().start);
-                if has_newline(ws) {
-                    let blanks = crate::formatter::count_blank_lines(ws);
-                    if blanks > 0 {
-                        docs.push(Doc::BlankLines(blanks));
-                    } else {
-                        docs.push(Doc::Newline);
-                    }
-                } else {
-                    docs.push(Doc::Space);
+            // 延时语句且 delay_on_same_line：与上一赋值同行（无换行）时合并到前一行末尾
+            let adjacent_delay = is_delay_stmt(f, *node)
+                && f.cfg.delay_on_same_line
+                && !blank_before
+                && !seg.is_empty()
+                && prev_end
+                    .map(|pe| !has_newline(f.ws(pe, node.byte_range().start)))
+                    .unwrap_or(false);
+            if adjacent_delay {
+                if !docs.is_empty()
+                    && !matches!(
+                        docs.last(),
+                        Some(Doc::Newline) | Some(Doc::BlankLines(_))
+                    )
+                {
+                    docs.push(Doc::Newline);
                 }
+                emit_assign_segment(f, &seg, &mut docs, false); // 最后一行不换行
+                seg.clear();
+                docs.push(Doc::Space);
+                docs.push(f.fmt(*node));
+            } else {
+                flush(&mut docs, &mut seg);
+                if !first && !blank_before {
+                    let ws = f.ws(prev_end.unwrap(), node.byte_range().start);
+                    // delay_on_same_line=false 时独立延时强制换行（不残留前导空格）
+                    if has_newline(ws) || (is_delay_stmt(f, *node) && !f.cfg.delay_on_same_line)
+                    {
+                        let blanks = crate::formatter::count_blank_lines(ws);
+                        if blanks > 0 {
+                            docs.push(Doc::BlankLines(blanks));
+                        } else {
+                            docs.push(Doc::Newline);
+                        }
+                    } else {
+                        docs.push(Doc::Space);
+                    }
+                }
+                docs.push(f.fmt(*node));
             }
-            docs.push(f.fmt(*node));
         }
         prev_end = Some(node.byte_range().end);
         first = false;
@@ -296,8 +331,26 @@ fn fmt_seq_block_body(f: &Formatter<'_>, body_nodes: &[CstNode<'_>]) -> Vec<Doc>
     docs
 }
 
+/// 是否为延时控制语句（如 `#1us;`）。
+fn is_delay_stmt(f: &Formatter<'_>, node: CstNode<'_>) -> bool {
+    let inner = unwrap_statement(f, node);
+    if inner.kind() != "procedural_timing_control_statement" {
+        return false;
+    }
+    inner
+        .children()
+        .iter()
+        .any(|c| c.kind() == "delay_control")
+}
+
 /// 输出赋值对齐组。
-fn emit_assign_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs: &mut Vec<Doc>) {
+/// `trailing_newline` 为 false 时最后一行不换行（供相邻延时合并到该行）。
+fn emit_assign_segment(
+    f: &Formatter<'_>,
+    seg: &[CstNode<'_>],
+    docs: &mut Vec<Doc>,
+    trailing_newline: bool,
+) {
     // 列：lhs、op、rhs
     let mut rows: Vec<(String, String, CstNode<'_>)> = Vec::new();
     let mut max_lhs = 0usize;
@@ -402,9 +455,11 @@ fn emit_assign_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs: &mut Vec<Do
     if let Some(l) = current {
         lines.push(l);
     }
-    for line in &lines {
+    for (i, line) in lines.iter().enumerate() {
         docs.push(Doc::text(line.clone()));
-        docs.push(Doc::Newline);
+        if i + 1 < lines.len() || trailing_newline {
+            docs.push(Doc::Newline);
+        }
     }
 }
 

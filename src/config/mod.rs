@@ -203,6 +203,9 @@ pub struct FormatterConfig {
     /// `else` 是否另起一行。
     #[serde(default = "default_true")]
     pub else_on_newline: bool,
+    /// 延时控制语句是否可与相邻语句放在同一行。
+    #[serde(default = "default_true")]
+    pub delay_on_same_line: bool,
 
     /// 是否统一 case/casez/casex 风格。
     #[serde(default)]
@@ -268,6 +271,7 @@ impl Default for FormatterConfig {
             end_of_line_for_begin: false,
             end_on_newline: false,
             else_on_newline: true,
+            delay_on_same_line: true,
             reformat_case: ReformatCase::None,
             case_indent_level: 1,
         }

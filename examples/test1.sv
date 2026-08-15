@@ -219,4 +219,12 @@ generate
     end  
     endgenerate
 
+reg                     rst = 0;
+initial
+begin
+    rst = 0; #1us;
+    rst = 1; #1us; 
+    rst = 0; #1us; 
+end
+
 endmodule

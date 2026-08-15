@@ -806,6 +806,31 @@ else begin
 end
 ```
 
+## delay_on_same_line
+独立的延时控制语句（如 `#1us;`）是否可与相邻语句放在同一行。启用后，格式化工具可将独立延时语句与其相邻语句保持在同一行；关闭后延时语句单独占一行。
+
+- 默认： true
+
+### true
+```verilog
+initial
+begin
+    rst = 0; #1us;
+    rst = 1; #1us;
+end
+```
+
+### false
+```verilog
+initial
+begin
+    rst = 0;
+    #1us;
+    rst = 1;
+    #1us;
+end
+```
+
 ## 其他
 
 ## reformat_case

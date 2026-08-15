@@ -487,6 +487,32 @@ fn end_of_line_for_begin() {
 }
 
 #[test]
+fn delay_on_same_line() {
+    // 独立延时语句（#1us;）：true 与相邻语句同行，false 单独一行
+    let src = "module t;\ninitial\nbegin\n    rst = 0; #1us;\n    rst = 1; #1us;\nend\nendmodule\n";
+    let out_true = fmt(src, &default_cfg());
+    assert!(
+        out_true.contains("rst = 0; #1us;"),
+        "默认独立延时与相邻语句同行: {out_true}"
+    );
+    let mut cfg = default_cfg();
+    cfg.delay_on_same_line = false;
+    let out_false = fmt(src, &cfg);
+    assert!(
+        out_false.contains("rst = 0;\n    #1us;"),
+        "关闭后延时单独一行: {out_false}"
+    );
+    assert_ne!(out_true, out_false, "delay_on_same_line 开关应改变输出");
+    // `always #5 clk = ~clk;`（延时直接控制语句，非独立）不受此选项影响
+    let src2 = "module t;\nalways #5 clk = ~clk;\nendmodule\n";
+    let a_true = fmt(src2, &default_cfg());
+    let mut cfg2 = default_cfg();
+    cfg2.delay_on_same_line = false;
+    let a_false = fmt(src2, &cfg2);
+    assert_eq!(a_true, a_false, "非独立延时不随 delay_on_same_line 改变");
+}
+
+#[test]
 fn end_on_newline() {
     let src = "module t;\nalways @(posedge clk) begin if(a) begin b <= 1; end else begin b <= 0; end end\nendmodule\n";
     let mut cfg = default_cfg();
