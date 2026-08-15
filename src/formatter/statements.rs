@@ -528,7 +528,9 @@ pub fn fmt_conditional(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                 if let Some(cmt) = comment_candidate
                     && cmt.is_named()
                     && cmt.kind().ends_with("comment")
-                    && !f.ws(child.byte_range().end, cmt.byte_range().start).contains('\n')
+                    && !f
+                        .ws(child.byte_range().end, cmt.byte_range().start)
+                        .contains('\n')
                 {
                     docs.push(Doc::Space);
                     docs.push(Doc::Space);
@@ -590,12 +592,15 @@ pub fn fmt_conditional(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     Doc::concat(docs)
 }
 
-/// 语句体：seq_block 换行 begin；单语句缩进。
+/// 语句体：seq_block 换行 begin；单语句缩进；if/else 链同样缩进一层。
 pub fn fmt_body(f: &Formatter<'_>, node: CstNode<'_>, _depth: usize) -> Doc {
     let inner = unwrap_statement(f, node);
     match inner.kind() {
         "seq_block" => fmt_seq_block(f, inner),
-        "conditional_statement" => fmt_conditional(f, inner),
+        "conditional_statement" => {
+            // if/else 链作为语句体时缩进一层（如 always 内无 begin/end 的 if 链）
+            Doc::concat(vec![Doc::Indent, fmt_conditional(f, inner), Doc::Dedent])
+        }
         _ => {
             // 单语句：用包装节点格式化（补齐 `;`）
             let body_doc = f.fmt(node);

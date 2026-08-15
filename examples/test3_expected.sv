@@ -39,4 +39,14 @@ spi_master_core_Ex01
     .sio3        (  sio3              )
 );
 
+always @(posedge clk)
+    if(rst)
+        sectorAddr <= 'd0;
+    else if(ST[IDLE] & nST[XFIS])
+        sectorAddr <= sataCmd_sectorAddr;
+    else if((ST[WTST] | ST[RDAT]) & FIS_tvaild[1] & sataAppReg_tvalid & sataAppReg_tready)
+        sectorAddr[23 : 0] <= sataAppReg_tdata[23:0];
+    else if((ST[WTST] | ST[RDAT]) & FIS_tvaild[2] & sataAppReg_tvalid & sataAppReg_tready)
+        sectorAddr[47 : 24] <= sataAppReg_tdata[23:0];
+
 endmodule
