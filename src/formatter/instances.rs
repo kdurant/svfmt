@@ -267,34 +267,40 @@ fn aligned_connections(
         );
     }
     let mut docs: Vec<Doc> = Vec::new();
-    let count = parsed.len();
-    for (i, (name, value)) in parsed.iter().enumerate() {
+    let mut rendered: Vec<(String, usize)> = Vec::new(); // (行文本, conns 索引)
+    let mut pi = 0usize;
+    for (ci, c) in conns.iter().enumerate() {
+        if c.is_named() && c.kind().ends_with("comment") {
+            // 行尾注释：追加到前一个连接行
+            if let Some((line, _)) = rendered.last_mut() {
+                line.push_str("  ");
+                line.push_str(c.text());
+            }
+            continue;
+        }
+        if pi >= parsed.len() {
+            break;
+        }
+        let (name, value) = &parsed[pi];
         let mut line = String::new();
-        // name 列
         line.push_str(&pad_col(name, name_max + 1));
         line.push('(');
-        // value 列（值 pad 到 value_max + 4，括号内侧各 2 空格）
         line.push_str(&" ".repeat(inner));
-        if std::env::var("SVDBG").is_ok() {
-            eprintln!(
-                "[line] value={:?} vlen={} target={} inner={}",
-                value,
-                value.chars().count(),
-                value_max + value_pad_extra,
-                inner
-            );
-        }
         line.push_str(&pad_col(value, value_max + value_pad_extra));
         line.push_str(&" ".repeat(inner));
         line.push(')');
-        // 逗号
-        let has_comma = i + 1 < count || conns[i].text().trim_end().ends_with(',');
+        let has_comma = pi + 1 < parsed.len() || c.text().trim_end().ends_with(',');
         if has_comma {
             line.push(',');
         }
-        docs.push(Doc::text(line));
-        if i + 1 < count {
-            let ws = f.ws(conns[i].byte_range().end, conns[i + 1].byte_range().start);
+        rendered.push((line, ci));
+        pi += 1;
+    }
+    // 输出行，行间换行/空行
+    let mut prev_ci: Option<usize> = None;
+    for (idx, (line, ci)) in rendered.iter().enumerate() {
+        if let Some(pci) = prev_ci {
+            let ws = f.ws(conns[pci].byte_range().end, conns[*ci].byte_range().start);
             let blanks = count_blank_lines(ws);
             if blanks > 0 {
                 docs.push(Doc::BlankLines(blanks));
@@ -302,6 +308,9 @@ fn aligned_connections(
                 docs.push(Doc::Newline);
             }
         }
+        let _ = idx;
+        docs.push(Doc::text(line.clone()));
+        prev_ci = Some(*ci);
     }
     Doc::concat(docs)
 }

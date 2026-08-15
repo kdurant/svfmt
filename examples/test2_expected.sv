@@ -107,7 +107,7 @@ begin
         ST_RDID_DATA :
             if(axis_handshake)
             begin
-                if(byte_cnt   <= 1)
+                if(byte_cnt <= 1)
                     state_nxt = ST_RDID_DONE;
                 else
                     state_nxt = ST_RDID_DATA;

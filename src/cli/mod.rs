@@ -30,8 +30,11 @@ pub fn run() -> Result<(), CliError> {
 
 /// 默认格式化流程。
 fn run_format(cli: &Cli) -> Result<(), CliError> {
-    let file = cli.file.as_ref().ok_or(CliError::MissingInput)?;
-    let source = read_source(file)?;
+    // 支持文件路径或 stdin（无参数 / `-`）
+    let source = match &cli.file {
+        Some(f) if f.to_string_lossy() != "-" => read_source(f)?,
+        _ => read_stdin()?,
+    };
 
     if cli.cst {
         let options = PrintOptions::default();
@@ -56,6 +59,11 @@ fn run_format(cli: &Cli) -> Result<(), CliError> {
 
     // 输出
     if cli.in_place {
+        let file = cli
+            .file
+            .as_ref()
+            .filter(|f| f.to_string_lossy() != "-")
+            .ok_or(CliError::MissingInput)?;
         std::fs::write(file, &formatted)
             .map_err(|e| CliError::Write(file.display().to_string(), e))?;
     } else if let Some(out) = &cli.output {
@@ -68,6 +76,14 @@ fn run_format(cli: &Cli) -> Result<(), CliError> {
         out.flush()?;
     }
     Ok(())
+}
+
+/// 从 stdin 读取全部内容。
+fn read_stdin() -> Result<String, CliError> {
+    let mut buf = String::new();
+    io::Read::read_to_string(&mut io::stdin().lock(), &mut buf)
+        .map_err(|e| CliError::ReadFile("<stdin>".into(), e))?;
+    Ok(buf)
 }
 
 fn run_cst(args: &CstArgs) -> Result<(), CliError> {

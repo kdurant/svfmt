@@ -13,7 +13,7 @@ use clap::{ArgAction, Args, Parser, Subcommand};
     propagate_version = true
 )]
 pub struct Cli {
-    /// 输入 .sv 文件路径
+    /// 输入 .sv 文件路径；省略或为 `-` 时从标准输入读取
     #[arg(value_name = "FILE")]
     pub file: Option<PathBuf>,
 

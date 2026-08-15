@@ -648,7 +648,16 @@ fn fmt_concat(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
             if let Some(p) = prev
                 && let Some(tok) = first_token_of(child)
             {
-                let sep = token_sep(f, Some(&p), &tok, &inner);
+                let sep = if p.kind == "," {
+                    // 逗号后：下一项是括号表达式则无空格，否则加空格
+                    if tok.kind == "(" {
+                        Sep::None
+                    } else {
+                        Sep::Space
+                    }
+                } else {
+                    token_sep(f, Some(&p), &tok, &inner)
+                };
                 apply_sep(f, &mut docs, &p, &tok, sep);
             }
             docs.push(d);
@@ -835,7 +844,7 @@ mod tests {
     fn concat_commas_have_no_space() {
         assert_eq!(
             fmt_expr_src("module t; assign y = {a, b, c}; endmodule\n"),
-            "module t;\nassign y = {a,b,c};\nendmodule\n"
+            "module t;\nassign y = {a, b, c};\nendmodule\n"
         );
     }
 
@@ -864,6 +873,6 @@ mod concat_debug {
         let tree = p.parse(src).unwrap();
         let doc = f.fmt(tree.root_node());
         let out = render(&doc, &RenderOptions::from(&cfg));
-        assert!(out.contains("{a,b,c}"), "got: {out:?}");
+        assert!(out.contains("{a, b, c}"), "got: {out:?}");
     }
 }

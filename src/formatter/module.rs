@@ -1,6 +1,6 @@
 //! 模块布局：module 声明、参数列表、端口列表、模块体。
 
-use crate::document::Doc;
+use crate::document::{render, Doc, RenderOptions};
 use crate::formatter::alignment::{align_rows, pad_to};
 use crate::formatter::expressions::{ExprCtx, fmt_expr};
 use crate::formatter::tokens::{display_width, has_newline, leaf_tokens};
@@ -452,7 +452,7 @@ fn assign_columns(f: &Formatter<'_>, node: CstNode<'_>) -> Vec<String> {
 /// net_assignment / variable_assignment 的 LHS 与 RHS（RHS 用表达式格式化规范）。
 fn assignment_columns(f: &Formatter<'_>, node: CstNode<'_>) -> (String, String) {
     let mut lhs = String::new();
-    let mut rhs: Option<CstNode<'_>> = None;
+    let mut rhs_parts: Vec<CstNode<'_>> = Vec::new();
     for c in node.children() {
         if c.kind() == "=" || c.kind() == "<=" {
             continue;
@@ -460,16 +460,21 @@ fn assignment_columns(f: &Formatter<'_>, node: CstNode<'_>) -> (String, String) 
         if lhs.is_empty() {
             lhs = c.text().to_string();
         } else {
-            rhs = Some(c);
+            rhs_parts.push(c);
         }
     }
-    let rhs_text = if let Some(r) = rhs {
-        let doc = fmt_expr(f, r, &ExprCtx::default());
-        let opts = crate::document::RenderOptions::from(f.cfg);
-        crate::document::render(&doc, &opts)
-    } else {
-        String::new()
-    };
+    let rhs_text = rhs_parts
+        .iter()
+        .map(|r| {
+            if r.kind() == "ERROR" {
+                // 宏前反引号：输出 ` + 空格（保持 ` PROJECT` 形态）
+                format!("{} ", r.text())
+            } else {
+                let doc = fmt_expr(f, *r, &ExprCtx::default());
+                render(&doc, &RenderOptions::from(f.cfg))
+            }
+        })
+        .collect::<String>();
     (lhs, rhs_text)
 }
 

@@ -465,11 +465,39 @@ pub fn fmt_conditional(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
             "else" => {
                 docs.push(Doc::Newline);
                 docs.push(Doc::text("else"));
+                // 行尾注释（`else // comment`，直接跟语句时）
+                if let Some(next) = items.get(i + 1)
+                    && next.is_named()
+                    && next.kind().ends_with("comment")
+                    && !f
+                        .ws(child.byte_range().end, next.byte_range().start)
+                        .contains('\n')
+                {
+                    docs.push(Doc::Space);
+                    docs.push(Doc::Space);
+                    docs.push(Doc::text(next.text()));
+                }
                 is_else = true;
                 cond_after_else = false;
             }
             "cond_predicate" => {
                 docs.push(crate::formatter::module::fmt_cond_expression(f, *child));
+                // 行尾注释（`else if(cond) // comment`，跳过 `)`）
+                let after = items.get(i + 1);
+                let comment_candidate = if after.is_some_and(|a| a.kind() == ")") {
+                    items.get(i + 2)
+                } else {
+                    after
+                };
+                if let Some(cmt) = comment_candidate
+                    && cmt.is_named()
+                    && cmt.kind().ends_with("comment")
+                    && !f.ws(child.byte_range().end, cmt.byte_range().start).contains('\n')
+                {
+                    docs.push(Doc::Space);
+                    docs.push(Doc::Space);
+                    docs.push(Doc::text(cmt.text()));
+                }
                 docs.push(Doc::Newline);
                 cond_after_else = true;
             }
