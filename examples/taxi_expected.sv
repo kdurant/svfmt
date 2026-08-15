@@ -52,7 +52,7 @@ module taxi_axis_gmii_rx #
     /*
          * Configuration
          */
-    input  wire logic [15:0]         cfg_rx_max_pkt_len,
+    input  wire logic [15:0]         cfg_rx_max_pkt_len = 16'd1518-1,
     input  wire logic                cfg_rx_enable,
 
     /*

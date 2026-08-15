@@ -37,6 +37,7 @@ module spi_master_core #
 
     if_axi_stream.slave        axis_slave,
     if_axi_stream.master       axis_master,
+    output  reg  [15:00]        data_out = 0,
 
     input  [7:0]      gps_m_axis_tdata,
     output reg [31:0] gps_week,

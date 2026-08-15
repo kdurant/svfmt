@@ -1021,6 +1021,7 @@ fn port_columns(f: &Formatter<'_>, node: CstNode<'_>) -> (bool, String, String, 
     let mut type_dim = String::new();
     let mut name = String::new();
     let mut unpacked = String::new();
+    let mut default_val = String::new();
     let mut is_interface = false;
     for c in items {
         match c.kind() {
@@ -1083,6 +1084,16 @@ fn port_columns(f: &Formatter<'_>, node: CstNode<'_>) -> (bool, String, String, 
             "unpacked_dimension" => {
                 unpacked.push_str(c.text());
             }
+            "=" => {
+                default_val.push('=');
+            }
+            "constant_expression" => {
+                if !default_val.is_empty() {
+                    default_val.push(' ');
+                }
+                // 归一化内部空白（如 `data_out = 32'hFF`）
+                default_val.push_str(&c.text().split_whitespace().collect::<Vec<_>>().join(" "));
+            }
             _ => {
                 if let Some(n) = c.child_by_field_name("port_name") {
                     name = n.text().to_string();
@@ -1094,6 +1105,10 @@ fn port_columns(f: &Formatter<'_>, node: CstNode<'_>) -> (bool, String, String, 
     }
     let mut name_full = name;
     name_full.push_str(&unpacked);
+    if !default_val.is_empty() {
+        name_full.push(' ');
+        name_full.push_str(&default_val);
+    }
     let _ = f;
     (is_interface, direction, type_dim, name_full)
 }
