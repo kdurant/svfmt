@@ -335,7 +335,7 @@ svfmt --dump-config
 等价于以下逐条命令（脚本会统一处理、输出汇总）：
 
 ```bash
-./target/release/svfmt examples/alu.sv -o /tmp/alu_tmp.sv && diff /tmp/alu_tmp.sv examples/alu_expected.sv
+./target/release/svfmt examples/alu.sv -o examples/alu_tmp.sv && diff examples/alu_tmp.sv examples/alu_expected.sv
 ./target/release/svfmt examples/bsg.sv -o /tmp/bsg_tmp.sv && diff /tmp/bsg_tmp.sv examples/bsg_expected.sv
 ./target/release/svfmt examples/controller.sv -o /tmp/controller_tmp.sv && diff /tmp/controller_tmp.sv examples/controller_expected.sv
 ./target/release/svfmt examples/core.sv -o /tmp/core_tmp.sv && diff /tmp/core_tmp.sv examples/core_expected.sv

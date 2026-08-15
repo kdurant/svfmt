@@ -161,7 +161,7 @@ logic        stat_rx_err_preamble_reg  = 1'b0, stat_rx_err_preamble_next;
 logic [PTP_TS_W-1:0] ptp_ts_out_reg = '0;
 
 logic [31:0] crc_state_reg = '1;
-wire [31:0]  crc_state     =;
+wire [31:0]  crc_state;
 
 assign m_axis_rx.tdata    = m_axis_rx_tdata_reg;
 assign m_axis_rx.tkeep    = 1'b1;

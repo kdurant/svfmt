@@ -670,3 +670,30 @@ fn align_assignments_toggle() {
         "关闭赋值对齐: {out_false}"
     );
 }
+
+#[test]
+fn no_spurious_equals_on_plain_decls() {
+    // 同一段内混有带初始化与不带初始化的声明：不带的不应补 `=`
+    let src = "module t;\nwire a;\nwire b = 1;\nwire [7:0] c;\nendmodule\n";
+    let out = fmt(src, &default_cfg());
+    assert!(!out.contains("=;"), "无初始化声明不应补空 `=`: {out}");
+    assert!(out.contains("b = 1;"), "有初始化声明保留 `= 1`: {out}");
+    // 名称对齐到同一列
+    let a_col = out
+        .lines()
+        .find(|l| l.contains(" a;"))
+        .and_then(|l| l.find("a;"))
+        .unwrap();
+    let b_col = out
+        .lines()
+        .find(|l| l.contains("b = 1"))
+        .and_then(|l| l.find('b'))
+        .unwrap();
+    let c_col = out
+        .lines()
+        .find(|l| l.contains("c;"))
+        .and_then(|l| l.find("c;"))
+        .unwrap();
+    assert_eq!(a_col, b_col, "a 与 b 名称列对齐: {out}");
+    assert_eq!(a_col, c_col, "a 与 c 名称列对齐: {out}");
+}

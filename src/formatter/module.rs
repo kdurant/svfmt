@@ -1279,8 +1279,8 @@ fn eq_columns(
                 name = name[..pos].trim().to_string();
                 ("decl", cols[0].clone(), name, Some(value))
             } else {
-                // 无初始化：仍输出 `=`（空值），与其他行对齐
-                ("decl", cols[0].clone(), name, Some(String::new()))
+                // 无初始化：不输出 `=`（value 为 None），仅与其他行对齐名称
+                ("decl", cols[0].clone(), name, None)
             }
         }
         "local_parameter_declaration" | "parameter_declaration" => {

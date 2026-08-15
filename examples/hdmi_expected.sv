@@ -91,8 +91,8 @@ module hdmi #
 );
 
 localparam int NUM_CHANNELS = 3;
-logic hsync                 =;
-logic vsync                 =;
+logic hsync;
+logic vsync;
 
 logic [BIT_WIDTH-1:0]  hsync_pulse_start, hsync_pulse_size;
 logic [BIT_HEIGHT-1:0] vsync_pulse_start, vsync_pulse_size;

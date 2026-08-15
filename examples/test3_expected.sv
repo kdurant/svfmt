@@ -56,4 +56,8 @@ always @ *
         default    : fisCommand = 'h0;                //
     endcase
 
+wire        sataAppReg_tvalid;
+wire        sataAppReg_tready = 1;
+wire [31:0] sataAppReg_tdata;
+
 endmodule
