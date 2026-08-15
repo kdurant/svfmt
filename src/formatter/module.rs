@@ -1003,6 +1003,17 @@ fn combine_type(type_kw: &str, width: &str) -> String {
     }
 }
 
+/// 判断类型节点是否为"单个裸标识符"（如接口名 `if_gmii`），
+/// 即 `data_type -> simple_identifier` 且无宽度。
+fn is_bare_identifier_type(node: CstNode<'_>) -> bool {
+    let t = match node.find_named_child("data_type") {
+        Some(dt) => dt,
+        None => node,
+    };
+    let named: Vec<CstNode<'_>> = t.named_children();
+    named.len() == 1 && named[0].kind() == "simple_identifier"
+}
+
 /// 端口行列：方向、类型+dim、名字(+unpacked)。
 fn port_columns(f: &Formatter<'_>, node: CstNode<'_>) -> (bool, String, String, String) {
     let items: Vec<CstNode<'_>> = node.children();
@@ -1026,7 +1037,7 @@ fn port_columns(f: &Formatter<'_>, node: CstNode<'_>) -> (bool, String, String, 
                 let mut dir = String::new();
                 let mut rest = String::new();
                 let mut seen_dir = false;
-                for h in header {
+                for h in &header {
                     if h.kind() == "port_direction" {
                         dir = h.text().to_string();
                         seen_dir = true;
@@ -1039,6 +1050,15 @@ fn port_columns(f: &Formatter<'_>, node: CstNode<'_>) -> (bool, String, String, 
                 }
                 if seen_dir {
                     direction = dir;
+                } else if c.kind() == "variable_port_header"
+                    && header
+                        .iter()
+                        .all(|h| h.kind() != "port_direction" && is_bare_identifier_type(*h))
+                {
+                    // 无方向的变量端口头且类型为单个裸标识符 → 接口端口
+                    // （tree-sitter 对 `if_gmii gmii_i` 无 modport 的接口端口
+                    //   会解析为 variable_port_header，这里恢复为接口处理）
+                    is_interface = true;
                 }
                 if type_dim.is_empty() {
                     type_dim = rest;

@@ -42,6 +42,12 @@ module spi_master_core #
     output reg [31:0]    gps_week,
     output reg [63:0]    gps_second,
 
+    if_gmii              gmii_i,
+    input      [08:00]   uart_rxd,
+    output     [08:00]   uart_txd,
+    if_ad7928            ad7928,
+    if_ad5328            ad5328,
+
     inout  wire          mosi,          // SIO0
     inout  wire          miso,          // SIO1
     inout  wire          wp,            // SIO2
