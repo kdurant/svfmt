@@ -318,18 +318,18 @@ svfmt --dump-config
 
 # 测试
 ```bash
-./target/release/svfmt examples/alu.sv -o examples/alu_tmp.sv && diff -b examples/alu_tmp.sv examples/alu_expected.sv 
+./target/release/svfmt examples/alu.sv -o examples/alu_tmp.sv && diff examples/alu_tmp.sv examples/alu_expected.sv 
 
 ./target/release/svfmt examples/controller.sv -o examples/controller_tmp.sv && diff -b examples/controller_tmp.sv examples/controller_expected.sv 
 
-./target/release/svfmt examples/core.sv -o examples/core_tmp.sv && diff -b examples/core_tmp.sv examples/core_expected.sv 
-./target/release/svfmt examples/hdmi.sv -o examples/hdmi_tmp.sv && diff -b examples/hdmi_tmp.sv examples/hdmi_expected.sv 
+./target/release/svfmt examples/core.sv -o examples/core_tmp.sv && diff examples/core_tmp.sv examples/core_expected.sv 
+./target/release/svfmt examples/hdmi.sv -o examples/hdmi_tmp.sv && diff examples/hdmi_tmp.sv examples/hdmi_expected.sv 
 ./target/release/svfmt examples/taxi.sv -o examples/taxi_tmp.sv && diff examples/taxi_tmp.sv examples/taxi_expected.sv 
 
-./target/release/svfmt examples/test1.sv -o examples/test1_tmp.sv && diff -b examples/test1_tmp.sv examples/test1_expected.sv 
+./target/release/svfmt examples/test1.sv -o examples/test1_tmp.sv && diff examples/test1_tmp.sv examples/test1_expected.sv 
 
-./target/release/svfmt examples/test2.sv -o examples/test2_tmp.sv && diff -b examples/test2_tmp.sv examples/test2_expected.sv 
-./target/release/svfmt examples/test3.sv -o examples/test3_tmp.sv && diff -b examples/test3_tmp.sv examples/test3_expected.sv 
+./target/release/svfmt examples/test2.sv -o examples/test2_tmp.sv && diff examples/test2_tmp.sv examples/test2_expected.sv 
+./target/release/svfmt examples/test3.sv -o examples/test3_tmp.sv && diff examples/test3_tmp.sv examples/test3_expected.sv 
 ```
 
 

@@ -251,8 +251,13 @@ fn fmt_seq_block_body(f: &Formatter<'_>, body_nodes: &[CstNode<'_>]) -> Vec<Doc>
         if is_assign {
             // 前一个元素若不是赋值（且不是注释），断组
             if !seg.is_empty() && !blank_before {
-                let prev_last = seg.last().unwrap();
-                if !is_assignment_stmt(f, *prev_last) {
+                let prev_last = seg
+                    .iter()
+                    .rev()
+                    .find(|n| !(n.is_named() && n.kind().ends_with("comment")));
+                if let Some(pl) = prev_last
+                    && !is_assignment_stmt(f, *pl)
+                {
                     flush(&mut docs, &mut seg);
                 }
             }
