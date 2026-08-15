@@ -260,6 +260,9 @@ fn aligned_connections(
     }
     let name_max = shared_name_max;
     let value_max = shared_value_max;
+    // wrap_instance_ports：连接数不超过阈值时单行显示
+    let wrap = f.cfg.wrap_instance_ports as usize;
+    let single_line = wrap >= 1 && parsed.len() <= wrap;
     if std::env::var("SVDBG").is_ok() {
         eprintln!(
             "[aligned2] name_max={} value_max={} extra={}",
@@ -296,16 +299,20 @@ fn aligned_connections(
         rendered.push((line, ci));
         pi += 1;
     }
-    // 输出行，行间换行/空行
+    // 输出行，行间换行/空行（单行模式用空格分隔）
     let mut prev_ci: Option<usize> = None;
     for (idx, (line, ci)) in rendered.iter().enumerate() {
         if let Some(pci) = prev_ci {
-            let ws = f.ws(conns[pci].byte_range().end, conns[*ci].byte_range().start);
-            let blanks = count_blank_lines(ws);
-            if blanks > 0 {
-                docs.push(Doc::BlankLines(blanks));
+            if single_line {
+                docs.push(Doc::Space);
             } else {
-                docs.push(Doc::Newline);
+                let ws = f.ws(conns[pci].byte_range().end, conns[*ci].byte_range().start);
+                let blanks = count_blank_lines(ws);
+                if blanks > 0 {
+                    docs.push(Doc::BlankLines(blanks));
+                } else {
+                    docs.push(Doc::Newline);
+                }
             }
         }
         let _ = idx;

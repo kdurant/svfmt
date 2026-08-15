@@ -231,7 +231,10 @@ pub fn token_sep(f: &Formatter<'_>, prev: Option<&Token>, cur: &Token, ctx: &Exp
             return Sep::None;
         }
         if prev.kind == "," {
-            return if ctx.in_concat { Sep::None } else { Sep::Space };
+            if ctx.in_concat {
+                return Sep::None;
+            }
+            return if cfg.space.after_comma { Sep::Space } else { Sep::None };
         }
         // 分号
         if cur.kind == ";" {
@@ -318,6 +321,14 @@ pub fn token_sep(f: &Formatter<'_>, prev: Option<&Token>, cur: &Token, ctx: &Exp
                     Sep::None
                 };
             }
+            return if cfg.space.after_unary_operators {
+                Sep::Space
+            } else {
+                Sep::None
+            };
+        }
+        // 一元运算符后（`~a` 等；加减一元由 fmt_unary 处理）
+        if is_unary_op(prev.kind) {
             return if cfg.space.after_unary_operators {
                 Sep::Space
             } else {
@@ -523,9 +534,13 @@ fn fmt_children_expr(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc
             prev = Some(tok);
         }
         if let Some(t) = last_token_of(child) {
-            // 一元运算符节点后的操作数无空格
+            // 一元运算符后：after_unary_operators 决定是否保留空格上下文
             if child.kind() == "unary_operator" {
-                prev = None;
+                if f.cfg.space.after_unary_operators {
+                    prev = Some(t);
+                } else {
+                    prev = None;
+                }
             } else {
                 prev = Some(t);
             }

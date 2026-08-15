@@ -143,7 +143,7 @@ pub struct FormatterConfig {
     #[serde(default = "default_zero")]
     pub column_limit: u32,
     /// 是否删除行尾多余空格与制表符。
-    #[serde(default = "default_false")]
+    #[serde(default = "default_true")]
     pub trim_trailing_whitespace: bool,
 
     /// 空格配置。

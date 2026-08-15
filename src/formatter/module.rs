@@ -79,6 +79,7 @@ fn append_body_items(f: &Formatter<'_>, docs: &mut Vec<Doc>, body: &[CstNode<'_>
         seg.clear();
     };
     let mut prev_end: Option<usize> = None;
+    let mut prev_is_proc = false;
     for raw in body {
         // 解开 module_item 包装
         let mut cur = *raw;
@@ -90,6 +91,7 @@ fn append_body_items(f: &Formatter<'_>, docs: &mut Vec<Doc>, body: &[CstNode<'_>
         let c = cur;
         let is_comment = c.is_named() && c.kind().ends_with("comment");
         let alignable = is_alignable(c);
+        let is_proc = is_procedural_item(c);
         // 与前一个元素之间是否有空行 → 断段
         let blank_before = prev_end
             .map(|pe| count_blank_lines(f.ws(pe, c.byte_range().start)) > 0)
@@ -116,14 +118,18 @@ fn append_body_items(f: &Formatter<'_>, docs: &mut Vec<Doc>, body: &[CstNode<'_>
             flush(f, &mut seg, docs);
         }
         // 处理与上一 item 的间隔（空行/换行）
-        if !docs.is_empty() && !matches!(docs.last(), Some(Doc::Newline) | Some(Doc::BlankLines(_)))
+        if !docs.is_empty()
+            && !matches!(docs.last(), Some(Doc::Newline) | Some(Doc::BlankLines(_)))
+            && let Some(pe) = prev_end
         {
             let start = c.byte_range().start;
-            let ws = f.ws(prev_end.unwrap(), start);
+            let ws = f.ws(pe, start);
             if has_newline(ws) {
                 let blanks = count_blank_lines(ws);
                 if blanks > 0 {
                     docs.push(Doc::BlankLines(blanks));
+                } else if f.cfg.blank_line_between_procedures && is_proc && prev_is_proc {
+                    docs.push(Doc::BlankLines(1));
                 } else {
                     docs.push(Doc::Newline);
                 }
@@ -144,8 +150,19 @@ fn append_body_items(f: &Formatter<'_>, docs: &mut Vec<Doc>, body: &[CstNode<'_>
             docs.push(f.fmt(c));
         }
         prev_end = Some(c.byte_range().end);
+        prev_is_proc = is_proc;
     }
     flush(f, &mut seg, docs);
+}
+
+/// 是否为过程块（always/initial/final/always_comb 等）。
+fn is_procedural_item(node: CstNode<'_>) -> bool {
+    let kind = node.kind();
+    kind.starts_with("always")
+        || kind.starts_with("initial_")
+        || kind.starts_with("final_")
+        || kind == "procedural_construct"
+        || kind.ends_with("_construct")
 }
 
 fn is_alignable(node: CstNode<'_>) -> bool {
@@ -371,6 +388,14 @@ fn pad_comment(
     let base = line.trim_end().to_string();
     let w = display_width(&base, f.cfg.tab_width as usize);
     let mut out = base;
+    if !f.cfg.align_trailing_comments {
+        // 关闭对齐：固定 comment_indent 空格
+        for _ in 0..f.cfg.comment_indent {
+            out.push(' ');
+        }
+        out.push_str(comment);
+        return out;
+    }
     if w >= target_rel {
         // 超长：按 comment_indent 空格分隔
         for _ in 0..f.cfg.comment_indent {
@@ -515,8 +540,12 @@ pub fn fmt_module_header(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                 i += 1;
             }
             "list_of_port_declarations" => {
-                // 换行 + (
-                docs.push(Doc::Newline);
+                // 括号换行配置
+                if f.cfg.module.port_list_break_before_open_paren {
+                    docs.push(Doc::Newline);
+                } else {
+                    docs.push(Doc::Space);
+                }
                 docs.push(Doc::text("("));
                 docs.push(Doc::Newline);
                 docs.push(Doc::Indent);
@@ -664,19 +693,17 @@ pub fn fmt_parameter_port_list(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     if let Some((s, e, line)) = pending {
         events.push((true, line, s, e));
     }
-    // 输出
+    // 输出（参数行之间强制换行）
     let mut first = true;
     let mut prev_end: Option<usize> = None;
-    for (_, text, start, end) in events {
+    for (is_param, text, start, end) in events {
         if !first {
             let ws = f.ws(prev_end.unwrap(), start);
-            if has_newline(ws) {
-                let blanks = count_blank_lines(ws);
-                if blanks > 0 {
-                    docs.push(Doc::BlankLines(blanks));
-                } else {
-                    docs.push(Doc::Newline);
-                }
+            let blank_before = count_blank_lines(ws) > 0;
+            if blank_before {
+                docs.push(Doc::BlankLines(count_blank_lines(ws)));
+            } else if has_newline(ws) || is_param {
+                docs.push(Doc::Newline);
             } else {
                 docs.push(Doc::Space);
             }
@@ -821,11 +848,21 @@ fn fmt_port_declarations(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
         if *is_if {
             let t = pad_to(type_dim, name_col, f.cfg.tab_width as usize);
             line.push_str(&t);
-        } else {
+        } else if f.cfg.module.port_alignment {
             let d = pad_to(dir, dir_col, f.cfg.tab_width as usize);
             line.push_str(&d);
             let t = pad_to(type_dim, name_col - dir_col, f.cfg.tab_width as usize);
             line.push_str(&t);
+        } else {
+            // 关闭对齐：单空格分隔
+            if !dir.is_empty() {
+                line.push_str(dir);
+                line.push(' ');
+            }
+            if !type_dim.is_empty() {
+                line.push_str(type_dim);
+                line.push(' ');
+            }
         }
         line.push_str(name);
         lines.push(line);
@@ -897,16 +934,15 @@ fn fmt_port_declarations(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     let mut docs: Vec<Doc> = Vec::new();
     let mut first = true;
     let mut prev_end: Option<usize> = None;
-    for (_, text, start, end) in events {
+    for (is_port_line, text, start, end) in events {
         if !first {
             let ws = f.ws(prev_end.unwrap(), start);
-            if has_newline(ws) {
-                let blanks = count_blank_lines(ws);
-                if blanks > 0 {
-                    docs.push(Doc::BlankLines(blanks));
-                } else {
-                    docs.push(Doc::Newline);
-                }
+            let blank_before = count_blank_lines(ws) > 0;
+            // newline_per_port：端口行之间强制换行
+            if blank_before {
+                docs.push(Doc::BlankLines(count_blank_lines(ws)));
+            } else if has_newline(ws) || (is_port_line && f.cfg.module.newline_per_port) {
+                docs.push(Doc::Newline);
             } else {
                 docs.push(Doc::Space);
             }
@@ -1110,7 +1146,9 @@ fn emit_eq_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs: &mut Vec<Doc>) 
                 l.push(' ');
                 l.push('=');
                 if !v.is_empty() {
-                    l.push(' ');
+                    if f.cfg.space.around_assignment {
+                        l.push(' ');
+                    }
                     l.push_str(v);
                 }
                 l.push(';');

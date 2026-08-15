@@ -96,12 +96,20 @@ pub fn fmt_procedural_construct(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                     docs.push(f.fmt(s));
                     docs.push(Doc::Dedent);
                 } else {
-                    docs.push(Doc::Newline);
+                    if f.cfg.begin_end_on_newline {
+                        docs.push(Doc::Newline);
+                    } else {
+                        docs.push(Doc::Space);
+                    }
                     docs.push(fmt_body(f, sb, 0));
                 }
             }
         } else {
-            docs.push(Doc::Newline);
+            if f.cfg.begin_end_on_newline {
+                docs.push(Doc::Newline);
+            } else {
+                docs.push(Doc::Space);
+            }
             docs.push(fmt_body(f, inner, 0));
         }
     }
@@ -115,6 +123,7 @@ pub fn fmt_seq_block(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     // 第一个子节点是 `begin`
     let mut iter = children.into_iter();
     let begin = iter.next();
+    let mut has_begin_trailing = false;
     if let Some(b) = begin
         && b.kind() == "begin"
     {
@@ -126,17 +135,26 @@ pub fn fmt_seq_block(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
             let trailing = f.trailing_inline(ws);
             if !trailing.is_empty() {
                 docs.push(Doc::text(trailing.to_string()));
+                has_begin_trailing = true;
             }
         }
     }
-    docs.push(Doc::Newline);
-    docs.push(Doc::Indent);
     // 收集所有非 begin/end 的直接子节点（含注释），按顺序
     let all_children = node.children();
     let body_nodes: Vec<CstNode<'_>> = all_children
         .into_iter()
         .filter(|c| c.kind() != "begin" && c.kind() != "end")
         .collect();
+    // begin 后：同行（单语句 + end_of_line_for_begin）或换行缩进
+    let single_body = body_nodes.len() == 1;
+    if f.cfg.end_of_line_for_begin && single_body {
+        if !has_begin_trailing {
+            docs.push(Doc::Space);
+        }
+    } else {
+        docs.push(Doc::Newline);
+        docs.push(Doc::Indent);
+    }
     // begin 与第一个语句之间的空行
     if let (Some(b), Some(first)) = (begin, body_nodes.first()) {
         let ws = f.ws(b.byte_range().end, first.byte_range().start);
@@ -356,12 +374,18 @@ fn emit_assign_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs: &mut Vec<Do
             if let Some((lhs, op, rhs)) = assignment_columns(inner) {
                 let mut line = String::new();
                 let mut cell = lhs.clone();
-                while cell.chars().count() < op_col {
+                if f.cfg.align_assignments {
+                    while cell.chars().count() < op_col {
+                        cell.push(' ');
+                    }
+                } else {
                     cell.push(' ');
                 }
                 line.push_str(&cell);
                 line.push_str(&op);
-                line.push(' ');
+                if f.cfg.space.around_assignment {
+                    line.push(' ');
+                }
                 let rhs_doc = fmt_expr(f, rhs, &crate::formatter::expressions::ExprCtx::default());
                 let rhs_text = render_doc(f, rhs_doc);
                 line.push_str(&rhs_text);
@@ -460,10 +484,17 @@ pub fn fmt_conditional(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                     docs.push(Doc::Space);
                 }
                 docs.push(Doc::text("if"));
+                if f.cfg.space.before_control_statement_parens {
+                    docs.push(Doc::Space);
+                }
                 cond_after_else = false;
             }
             "else" => {
-                docs.push(Doc::Newline);
+                if f.cfg.else_on_newline || f.cfg.end_on_newline {
+                    docs.push(Doc::Newline);
+                } else {
+                    docs.push(Doc::Space);
+                }
                 docs.push(Doc::text("else"));
                 // 行尾注释（`else // comment`，直接跟语句时）
                 if let Some(next) = items.get(i + 1)
@@ -498,12 +529,20 @@ pub fn fmt_conditional(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                     docs.push(Doc::Space);
                     docs.push(Doc::text(cmt.text()));
                 }
-                docs.push(Doc::Newline);
+                if f.cfg.begin_end_on_newline {
+                    docs.push(Doc::Newline);
+                } else {
+                    docs.push(Doc::Space);
+                }
                 cond_after_else = true;
             }
             "statement_or_null" => {
                 if is_else && !cond_after_else {
-                    docs.push(Doc::Newline);
+                    if f.cfg.else_on_newline || f.cfg.end_on_newline {
+                        docs.push(Doc::Newline);
+                    } else {
+                        docs.push(Doc::Space);
+                    }
                 }
                 let inner = unwrap_statement(f, *child);
                 if matches!(inner.kind(), "seq_block" | "conditional_statement") {
@@ -570,7 +609,15 @@ pub fn fmt_case_statement(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
         let c = items[i];
         if c.kind() == "case_keyword" || c.kind() == "casez_keyword" || c.kind() == "casex_keyword"
         {
-            docs.push(Doc::text(c.text()));
+            let text = match f.cfg.reformat_case {
+                crate::config::ReformatCase::None => c.text(),
+                crate::config::ReformatCase::Casez => "casez",
+                crate::config::ReformatCase::Casex => "casex",
+            };
+            docs.push(Doc::text(text));
+            if f.cfg.space.before_control_statement_parens {
+                docs.push(Doc::Space);
+            }
             i += 1;
             continue;
         }
@@ -629,7 +676,9 @@ pub fn fmt_case_statement(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
         expr_widths.iter().copied().max().unwrap_or(0)
     };
     docs.push(Doc::Newline);
-    docs.push(Doc::Indent);
+    for _ in 0..f.cfg.case_indent_level {
+        docs.push(Doc::Indent);
+    }
     // 重新构建行：注释同行则合并
     let mut out_texts: Vec<Option<String>> = Vec::new();
     let mut current: Option<String> = None;
@@ -815,9 +864,11 @@ pub fn fmt_case_item(f: &Formatter<'_>, node: CstNode<'_>, align_width: &[usize]
             let cur = case_item_expr_text(f, node).chars().count();
             let pad_n = if body_is_seq {
                 1
-            } else {
+            } else if f.cfg.align_case_items {
                 let w = align_width.first().copied().unwrap_or(0);
                 if w > cur { w - cur + 1 } else { 1 }
+            } else {
+                1
             };
             let mut pad = String::new();
             for _ in 0..pad_n {
@@ -894,6 +945,9 @@ pub fn fmt_loop_statement(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                     eprintln!("[loop] FOR");
                 }
                 docs.push(Doc::text("for"));
+                if f.cfg.space.before_control_statement_parens {
+                    docs.push(Doc::Space);
+                }
                 i += 1;
             }
             "(" => {
