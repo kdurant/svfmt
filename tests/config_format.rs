@@ -296,6 +296,49 @@ fn align_case_items() {
 }
 
 #[test]
+fn case_trailing_comments_align() {
+    // 连续单行分支的行尾注释应对齐到同一列
+    let src = "module t;\nalways @ *\n    case(1'b1)\n        cmdType[1] : fisCommand = FIS_CMD_DMA_READ;  //read\n        cmdType[2] : fisCommand = FIS_CMD_DMA_WRITE;  //write\n        default    : fisCommand = 'h0;  //\n    endcase\nendmodule\n";
+    let out = fmt(src, &default_cfg());
+    let col = |line: &str, needle: &str| line.find(needle).unwrap();
+    let read_line = out.lines().find(|l| l.contains("//read")).unwrap();
+    let write_line = out.lines().find(|l| l.contains("//write")).unwrap();
+    let default_line = out.lines().find(|l| l.contains("'h0;")).unwrap();
+    assert_eq!(
+        col(read_line, "//read"),
+        col(write_line, "//write"),
+        "连续单行注释应对齐: {out}"
+    );
+    assert_eq!(
+        col(read_line, "//read"),
+        col(default_line, "//"),
+        "default 注释也应与其他注释对齐: {out}"
+    );
+}
+
+#[test]
+fn if_else_chain_comments_align() {
+    // if/else 链：if 体语句与 else if 行是连续单行注释 → 对齐；
+    // else 行是孤立注释 → 保持自然位置
+    let src = "module t;\nalways @(posedge clk)\nbegin\n    if(a)\n        x = 1;  // A\n    else if(bbbbbb)  // B\n        y = 2;\n    else  // C\n        z = 3;\nend\nendmodule\n";
+    let out = fmt(src, &default_cfg());
+    let col = |line: &str, needle: &str| line.find(needle).unwrap();
+    let a_line = out.lines().find(|l| l.contains("// A")).unwrap();
+    let b_line = out.lines().find(|l| l.contains("// B")).unwrap();
+    let c_line = out.lines().find(|l| l.contains("// C")).unwrap();
+    assert_eq!(
+        col(a_line, "// A"),
+        col(b_line, "// B"),
+        "连续注释 A（if 体）与 B（else if）应对齐: {out}"
+    );
+    assert_ne!(
+        col(a_line, "// A"),
+        col(c_line, "// C"),
+        "孤立注释 C（else）不应对齐: {out}"
+    );
+}
+
+#[test]
 fn case_indent_level() {
     let src = "module t;\nalways @(posedge clk) begin case (a) 1'b0: b = 1; default: b = 0; endcase end\nendmodule\n";
     let mut cfg = default_cfg();

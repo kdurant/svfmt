@@ -618,7 +618,7 @@ begin
             begin
                 if(is_user_rdsr)
                     state_nxt = ST_IDLE;  // user RDSR: exit after one poll
-                else if(poll_status[0])  // WIP = 1 → still busy (internal poll)
+                else if(poll_status[0])   // WIP = 1 → still busy (internal poll)
                     state_nxt = ST_POLL_CMD;
                 else  // WIP = 0 → done (internal poll)
                     state_nxt = ST_IDLE;

@@ -49,4 +49,11 @@ else if((ST[WTST] | ST[RDAT]) & FIS_tvaild[1] & sataAppReg_tvalid & sataAppReg_t
 else if((ST[WTST] | ST[RDAT]) & FIS_tvaild[2] & sataAppReg_tvalid & sataAppReg_tready)
     sectorAddr[47 : 24] <= sataAppReg_tdata[23:0];
 
+always @ *
+    case(1'b1)
+        cmdType[1] : fisCommand = FIS_CMD_DMA_READ;  //read
+        cmdType[2] : fisCommand = FIS_CMD_DMA_WRITE;  //write
+        default    : fisCommand = 'h0;  //
+    endcase
+
 endmodule

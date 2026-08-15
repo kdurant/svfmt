@@ -480,6 +480,115 @@ fn assignment_columns(node: CstNode<'_>) -> Option<(String, String, CstNode<'_>)
 pub fn fmt_conditional(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     let mut docs: Vec<Doc> = Vec::new();
     let items: Vec<CstNode<'_>> = node.children();
+
+    // —— 连续单行注释对齐预计算 ——
+    // 规则：链内"连续"（无空行、中间无非注释单语句）的多个行内注释对齐到同一列
+    // （相对链基准的最长内容宽度 + 2）；孤立注释保持自然位置（2 空格）。
+    // 注释点：(anchor_start, anchor_end, code_end_rel, is_body)
+    //   body 单语句 → code_end_rel = indent_width + 语句宽（body 比链基准多一层缩进）
+    //   else 行     → code_end_rel = 4（"else"）
+    //   else if 行  → code_end_rel = "else if(cond)" 宽
+    let indent_w = f.cfg.indent_width as usize;
+    let mut pts: Vec<(usize, usize, usize)> = Vec::new();
+    {
+        let has_inline = |node: CstNode<'_>, next: &CstNode<'_>| -> bool {
+            next.is_named()
+                && next.kind().ends_with("comment")
+                && !f
+                    .ws(node.byte_range().end, next.byte_range().start)
+                    .contains('\n')
+        };
+        for (i, c) in items.iter().enumerate() {
+            match c.kind() {
+                "statement_or_null" => {
+                    let inner = unwrap_statement(f, *c);
+                    if !matches!(inner.kind(), "seq_block" | "conditional_statement")
+                        && items.get(i + 1).map(|n| has_inline(*c, n)).unwrap_or(false)
+                    {
+                        let w = render_doc(f, f.fmt(*c)).chars().count();
+                        pts.push((c.byte_range().start, c.byte_range().end, indent_w + w));
+                    }
+                }
+                "else" => {
+                    if items.get(i + 1).map(|n| has_inline(*c, n)).unwrap_or(false) {
+                        pts.push((c.byte_range().start, c.byte_range().end, 4));
+                    }
+                }
+                "cond_predicate" => {
+                    let after = items.get(i + 1);
+                    let cc = if after.is_some_and(|a| a.kind() == ")") {
+                        items.get(i + 2)
+                    } else {
+                        after
+                    };
+                    if cc.map(|n| has_inline(*c, n)).unwrap_or(false) {
+                        let cond_w =
+                            render_doc(f, crate::formatter::module::fmt_cond_expression(f, *c))
+                                .chars()
+                                .count();
+                        let mut w = 4 + 1 + 2 + cond_w;
+                        if f.cfg.space.before_control_statement_parens {
+                            w += 1;
+                        }
+                        pts.push((c.byte_range().start, c.byte_range().end, w));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    // 划分连续 run，计算每个注释点的对齐目标（相对链基准）
+    let n = pts.len();
+    let mut targets: Vec<Option<usize>> = vec![None; n];
+    if n >= 2 {
+        let mut brk = vec![false; n];
+        for k in 1..n {
+            // 空行 → 断组
+            let ws = f.ws(pts[k - 1].1, pts[k].0);
+            if crate::formatter::count_blank_lines(ws) > 0 {
+                brk[k] = true;
+                continue;
+            }
+            // 两个注释点之间的非注释单语句 → 断组
+            for c in &items {
+                if c.byte_range().start <= pts[k - 1].1 || c.byte_range().start >= pts[k].0 {
+                    continue;
+                }
+                if c.is_named() && c.kind().ends_with("comment") {
+                    continue;
+                }
+                if c.kind() == "statement_or_null" {
+                    let inner = unwrap_statement(f, *c);
+                    if !matches!(inner.kind(), "seq_block" | "conditional_statement") {
+                        brk[k] = true;
+                        break;
+                    }
+                }
+            }
+        }
+        let mut i = 0;
+        while i < n {
+            let mut j = i;
+            while j + 1 < n && !brk[j + 1] {
+                j += 1;
+            }
+            if j > i {
+                let run_max = pts[i..=j].iter().map(|p| p.2).max().unwrap_or(0);
+                let target = run_max + 2;
+                for k in i..=j {
+                    targets[k] = Some(target);
+                }
+            }
+            i = j + 1;
+        }
+    }
+    // 按注释点 anchor 起始字节查对齐目标
+    let target_for = |start: usize| -> Option<usize> {
+        pts.iter()
+            .position(|p| p.0 == start)
+            .and_then(|k| targets[k])
+    };
+
     let mut is_else = false;
     let mut cond_after_else = false;
     for (i, child) in items.iter().enumerate() {
@@ -509,8 +618,12 @@ pub fn fmt_conditional(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                         .ws(child.byte_range().end, next.byte_range().start)
                         .contains('\n')
                 {
-                    docs.push(Doc::Space);
-                    docs.push(Doc::Space);
+                    let pad = target_for(child.byte_range().start)
+                        .map(|t| t.saturating_sub(4))
+                        .unwrap_or(2);
+                    for _ in 0..pad {
+                        docs.push(Doc::Space);
+                    }
                     docs.push(Doc::text(next.text()));
                 }
                 is_else = true;
@@ -532,8 +645,25 @@ pub fn fmt_conditional(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                         .ws(child.byte_range().end, cmt.byte_range().start)
                         .contains('\n')
                 {
-                    docs.push(Doc::Space);
-                    docs.push(Doc::Space);
+                    let pad = match target_for(child.byte_range().start) {
+                        Some(t) => {
+                            let cond_w = render_doc(
+                                f,
+                                crate::formatter::module::fmt_cond_expression(f, *child),
+                            )
+                            .chars()
+                            .count();
+                            let mut w = 4 + 1 + 2 + cond_w;
+                            if f.cfg.space.before_control_statement_parens {
+                                w += 1;
+                            }
+                            t.saturating_sub(w)
+                        }
+                        None => 2,
+                    };
+                    for _ in 0..pad {
+                        docs.push(Doc::Space);
+                    }
                     docs.push(Doc::text(cmt.text()));
                 }
                 if f.cfg.begin_end_on_newline {
@@ -567,14 +697,18 @@ pub fn fmt_conditional(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                     if let Some(cmt) = trailing_comment {
                         let text = render_doc(f, body_doc);
                         let semi_rel = text.rfind(';').unwrap_or(0);
-                        // 语句内行尾注释：对齐到 semi+3（相对行首），禁用 40 下限
+                        // 语句内行尾注释：默认对齐到 semi+3；连续 run 时对齐到目标列
                         let base_indent = f.cfg.comment_column as usize;
+                        let bms = match target_for(child.byte_range().start) {
+                            Some(t) => (t - indent_w).saturating_sub(3),
+                            None => semi_rel,
+                        };
                         let padded = crate::formatter::module::pad_comment_pub(
                             f,
                             &text,
                             cmt.text(),
                             base_indent,
-                            semi_rel,
+                            bms,
                         );
                         docs.push(Doc::Indent);
                         docs.push(Doc::text(padded));
@@ -685,29 +819,86 @@ pub fn fmt_case_statement(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     } else {
         expr_widths.iter().copied().max().unwrap_or(0)
     };
+    // 预渲染所有 case_item：行尾注释的公共对齐列 = 所在"连续 run"内最长行的 `;`。
+    // 规则：只有"相邻（无空行间隔）的带行内注释单行分支"组成一组，组内注释对齐。
+    let pre_texts: Vec<String> = items_only
+        .iter()
+        .map(|c| render_doc(f, fmt_case_item(f, *c, &[max_w])))
+        .collect();
+    let n = pre_texts.len();
+    // 每个 item 是否为"带行内注释的单行分支"
+    let mut commented = vec![false; n];
+    for (idx, t) in pre_texts.iter().enumerate() {
+        if t.contains('\n') {
+            continue;
+        }
+        let ci = items_only[idx];
+        commented[idx] = events
+            .iter()
+            .find(|e| e.byte_range().start >= ci.byte_range().end)
+            .map(|next| {
+                next.is_named()
+                    && next.kind().ends_with("comment")
+                    && !f
+                        .ws(ci.byte_range().end, next.byte_range().start)
+                        .contains('\n')
+            })
+            .unwrap_or(false);
+    }
+    // 相邻判断：两个 case_item 之间的空白无空行
+    let adjacent = |j: usize| -> bool {
+        let a = items_only[j];
+        let b = items_only[j + 1];
+        let ws = f.ws(a.byte_range().end, b.byte_range().start);
+        crate::formatter::count_blank_lines(ws) == 0
+    };
+    // 划分连续 run，run 内所有 item 的对齐列 = run 内最长 `;`
+    let mut align: Vec<usize> = vec![0; n];
+    let mut i = 0usize;
+    while i < n {
+        if !commented[i] {
+            i += 1;
+            continue;
+        }
+        let mut j = i;
+        let mut run_max = pre_texts[i].rfind(';').unwrap_or(0);
+        while j + 1 < n && commented[j + 1] && adjacent(j) {
+            j += 1;
+            let s = pre_texts[j].rfind(';').unwrap_or(0);
+            if s > run_max {
+                run_max = s;
+            }
+        }
+        for k in i..=j {
+            align[k] = run_max;
+        }
+        i = j + 1;
+    }
     docs.push(Doc::Newline);
     for _ in 0..f.cfg.case_indent_level {
         docs.push(Doc::Indent);
     }
-    // 重新构建行：注释同行则合并
+    // 重新构建行：注释同行则合并（对齐到所在 run 的最长 `;` + 3）
     let mut out_texts: Vec<Option<String>> = Vec::new();
-    let mut current: Option<String> = None;
+    let mut current: Option<(String, usize)> = None; // (单行文本, items_only 索引)
+    let mut pi = 0usize;
     for c in &events {
         if c.kind() == "case_item" {
-            if let Some(l) = current.take() {
+            if let Some((l, _)) = current.take() {
                 out_texts.push(Some(l));
             }
             let doc = fmt_case_item(f, *c, &[max_w]);
             let text = render_doc(f, doc);
+            let idx = pi;
+            pi += 1;
             if text.contains('\n') {
                 out_texts.push(Some(text));
             } else {
-                current = Some(text);
+                current = Some((text, idx));
             }
         } else {
             // 注释
-            if let Some(l) = current.take() {
-                // 合并到上一个单行 case_item
+            if let Some((l, idx)) = current.take() {
                 let cmt_text = c.text();
                 let prev_event = events
                     .iter()
@@ -716,13 +907,12 @@ pub fn fmt_case_statement(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                     .map(|e| f.ws(e.byte_range().end, c.byte_range().start))
                     .unwrap_or("");
                 if !ws.contains('\n') {
-                    let semi_rel = l.rfind(';').unwrap_or(0);
                     let padded = crate::formatter::module::pad_comment_pub(
                         f,
                         &l,
                         cmt_text,
                         f.cfg.comment_column as usize,
-                        semi_rel,
+                        align[idx],
                     );
                     out_texts.push(Some(padded));
                 } else {
@@ -734,7 +924,7 @@ pub fn fmt_case_statement(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
             }
         }
     }
-    if let Some(l) = current {
+    if let Some((l, _)) = current {
         out_texts.push(Some(l));
     }
     // 输出行，行间换行/空行（依据事件原文空白）
