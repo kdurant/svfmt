@@ -1,6 +1,6 @@
 //! 模块布局：module 声明、参数列表、端口列表、模块体。
 
-use crate::document::{Doc, RenderOptions, render};
+use crate::document::{Doc, render_inline};
 use crate::formatter::alignment::{align_rows, pad_to};
 use crate::formatter::expressions::{ExprCtx, fmt_expr};
 use crate::formatter::tokens::{display_width, has_newline, leaf_tokens};
@@ -501,7 +501,7 @@ fn assignment_columns(f: &Formatter<'_>, node: CstNode<'_>) -> (String, String) 
                 format!("{} ", r.text())
             } else {
                 let doc = fmt_expr(f, *r, &ExprCtx::default());
-                render(&doc, &RenderOptions::from(f.cfg))
+                render_inline(&doc, f.cfg)
             }
         })
         .collect::<String>();
@@ -513,38 +513,61 @@ pub fn fmt_module_header(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     let mut docs: Vec<Doc> = Vec::new();
     let items: Vec<CstNode<'_>> = node.children();
     let mut i = 0;
+    // 是否位于行首：docs 末尾是 Newline（或 docs 为空），下一输出将顶格。
+    let mut at_line_start = true;
     // module + name
     while i < items.len() {
         let c = items[i];
         if c.kind() == "module_keyword" {
             docs.push(Doc::text("module"));
+            at_line_start = false;
             i += 1;
         } else if c.kind() == "simple_identifier" {
-            docs.push(Doc::Space);
+            if !at_line_start {
+                docs.push(Doc::Space);
+            }
             docs.push(Doc::text(c.text()));
+            at_line_start = false;
             i += 1;
         } else {
             break;
         }
     }
-    // parameter_port_list
+    // 头部其余部分（parameter/port/package_import 等）
     let mut port_paren_break = false;
     let mut seen_semi = false;
     while i < items.len() {
         let c = items[i];
         match c.kind() {
+            "package_import_declaration" => {
+                // import 与模块名同行（空格分隔），避免粘连成一个标识符。
+                // 粘连会把 `module nameimport ...` 拼成一个标识符，导致二次
+                // 解析结构漂移、破坏幂等性（见 examples/bsg.sv）。
+                if !at_line_start {
+                    docs.push(Doc::Space);
+                }
+                docs.push(f.fmt(c));
+                at_line_start = false;
+                i += 1;
+            }
             "parameter_port_list" => {
-                let pl = fmt_parameter_port_list(f, c);
-                docs.push(Doc::Space);
-                docs.push(pl);
+                if !at_line_start {
+                    docs.push(Doc::Space);
+                }
+                docs.push(fmt_parameter_port_list(f, c));
+                at_line_start = false;
                 i += 1;
             }
             "list_of_port_declarations" => {
                 // 括号换行配置
                 if f.cfg.module.port_list_break_before_open_paren {
                     docs.push(Doc::Newline);
+                    at_line_start = true;
                 } else {
-                    docs.push(Doc::Space);
+                    if !at_line_start {
+                        docs.push(Doc::Space);
+                    }
+                    at_line_start = false;
                 }
                 docs.push(Doc::text("("));
                 docs.push(Doc::Newline);
@@ -558,9 +581,10 @@ pub fn fmt_module_header(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                 i += 1;
             }
             "list_of_ports" => {
-                // 非 ANSI：空则 `()`，否则 `(...)`
+                // 非 ANSI：空则 `()`，否则 `(...)`，紧跟模块名（无空格）
                 let text = c.text();
                 docs.push(Doc::text(text.trim_end().to_string()));
+                at_line_start = false;
                 i += 1;
             }
             ";" => {

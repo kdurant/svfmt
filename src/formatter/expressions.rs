@@ -400,6 +400,12 @@ pub fn fmt_default(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     for tok in &toks {
         if let Some(p) = &prev {
             let sep = token_sep(f, Some(p), tok, &ctx);
+            // 注意：不在 fallback（token 序列）路径发射 SoftLine。
+            // fmt_default 用于连续赋值 / net_assignment 等 fallback 上下文，
+            // 内部 SoftLine 断行会依赖原文空白（Sep::Keep），在 generate 块 /
+            // ERROR 区域等脆弱位置会破坏解析结构、导致幂等性漂移
+            // （见 examples/hdmi.sv）。断行只由结构化路径
+            // （fmt_children_expr / fmt_assignment / fmt_call）负责。
             apply_sep(f, &mut docs, p, tok, sep);
         }
         docs.push(Doc::text(tok.text));
@@ -464,7 +470,8 @@ pub fn fmt_expr(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
             fmt_children_expr(f, node, &inner)
         }
         "packed_dimension" | "unpacked_dimension" => fmt_dimension(f, node, ctx),
-        "function_call" | "system_function_call" | "call" => fmt_call(f, node, ctx),
+        "function_call" | "system_function_call" | "call" | "system_tf_call" | "tf_call"
+        | "subroutine_call" | "subroutine_call_statement" => fmt_call(f, node, ctx),
         "assignment_expression"
         | "blocking_assignment"
         | "nonblocking_assignment"
@@ -520,7 +527,12 @@ fn fmt_children_expr(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc
                 // 子节点前可能需要间隔（如 list_of_arguments 内的逗号）
                 if let Some(tok) = first_token_of(child) {
                     let sep = token_sep(f, Some(&p), &tok, ctx);
-                    apply_sep(f, &mut docs, &p, &tok, sep);
+                    // 逗号后：超宽时断行（column_limit）
+                    if p.kind == "," && sep == Sep::Space {
+                        docs.push(Doc::SoftLine);
+                    } else {
+                        apply_sep(f, &mut docs, &p, &tok, sep);
+                    }
                 }
             }
             docs.push(d);
@@ -528,7 +540,12 @@ fn fmt_children_expr(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc
             let tok = to_token(f, child);
             if let Some(p) = prev {
                 let sep = token_sep(f, Some(&p), &tok, ctx);
-                apply_sep(f, &mut docs, &p, &tok, sep);
+                // 二元运算符前：超宽时断行（column_limit）
+                if is_binary_op(tok.kind) && sep == Sep::Space {
+                    docs.push(Doc::SoftLine);
+                } else {
+                    apply_sep(f, &mut docs, &p, &tok, sep);
+                }
             }
             docs.push(Doc::text(tok.text));
             prev = Some(tok);
@@ -580,7 +597,12 @@ fn fmt_binary(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
             let tok = to_token(f, child);
             if let Some(p) = prev {
                 let sep = token_sep(f, Some(&p), &tok, ctx);
-                apply_sep(f, &mut docs, &p, &tok, sep);
+                // 二元运算符前：超宽时断行（column_limit）
+                if is_binary_op(tok.kind) && sep == Sep::Space {
+                    docs.push(Doc::SoftLine);
+                } else {
+                    apply_sep(f, &mut docs, &p, &tok, sep);
+                }
             }
             docs.push(Doc::text(tok.text));
             prev = Some(tok);
@@ -781,6 +803,14 @@ fn fmt_call(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
                 apply_sep(f, &mut docs, &p, &tok, sep);
             }
             docs.push(Doc::text(tok.text));
+            // 左括号后：单行时无空格（`$display("...")`），超宽时参数整体
+            // 换行并缩进（column_limit）。用 SoftLineNil：flat 时不输出。
+            if tok.kind == "(" {
+                docs.push(Doc::Indent);
+                docs.push(Doc::SoftLineNil);
+            } else if tok.kind == ")" {
+                docs.push(Doc::Dedent);
+            }
             prev = Some(tok);
         }
     }
@@ -802,7 +832,12 @@ pub fn fmt_assignment(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Do
                 } else {
                     Sep::None
                 };
-                apply_sep(f, &mut docs, &p, &tok, sep);
+                // 赋值符后：超宽时断行（column_limit）
+                if is_assignment_op(p.kind) && sep == Sep::Space {
+                    docs.push(Doc::SoftLine);
+                } else {
+                    apply_sep(f, &mut docs, &p, &tok, sep);
+                }
             }
             docs.push(fmt_expr(f, child, ctx));
             if let Some(t) = last_token_of(child) {

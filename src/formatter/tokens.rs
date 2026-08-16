@@ -28,6 +28,13 @@ where
 {
     let children = node.children();
     if children.is_empty() {
+        // 跳过 MISSING 空 token（如孤立反引号 ` 后缺失的宏名）。
+        // 这类 token 源中没有文本（text 为空），输出它们会让 `fmt_default`
+        // 的间隔规则在错误的位置插入空格（如 `prev.kind == "`" → Space），
+        // 导致重复格式化时行内空格逐轮增长、破坏幂等性（见 examples/bsg.sv）。
+        if node.is_missing() || node.byte_range().is_empty() {
+            return;
+        }
         // 叶子
         let (s, e) = {
             let r = node.byte_range();

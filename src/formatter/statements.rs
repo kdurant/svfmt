@@ -462,10 +462,9 @@ fn render_doc_width(f: &Formatter<'_>, node: CstNode<'_>) -> usize {
     render_doc(f, doc).chars().count()
 }
 
-/// 把 Doc 渲染为文本（用于 rhs）。
+/// 把 Doc 渲染为文本（用于 rhs，强制单行不受 column_limit 影响）。
 fn render_doc(f: &Formatter<'_>, doc: Doc) -> String {
-    let opts = crate::document::RenderOptions::from(f.cfg);
-    crate::document::render(&doc, &opts)
+    crate::document::render_inline(&doc, f.cfg)
 }
 
 fn prev_node_end(seg: &[CstNode<'_>], node: CstNode<'_>) -> Option<usize> {
@@ -790,6 +789,74 @@ pub fn fmt_body(f: &Formatter<'_>, node: CstNode<'_>, _depth: usize) -> Doc {
             Doc::concat(vec![Doc::Indent, body_doc, Doc::Dedent])
         }
     }
+}
+
+/// `simple_immediate_assert_statement`：`assert(cond) [else statement]`。
+///
+/// 结构化输出（而非 raw 原文），避免原文缩进与外部 `Indent` 叠加，导致
+/// 重复格式化时 else 分支缩进逐轮累积、破坏幂等性（见 examples/bsg.sv 的
+/// `assert(...) else $error(...)`）。输出形态：
+///
+/// ```text
+/// assert(cond) else
+///     $error(...);
+/// ```
+pub fn fmt_assert(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
+    let mut docs: Vec<Doc> = Vec::new();
+    for child in node.children() {
+        match child.kind() {
+            "assert" => docs.push(Doc::text("assert")),
+            "(" => docs.push(Doc::text("(")),
+            ")" => docs.push(Doc::text(")")),
+            ";" => docs.push(Doc::text(";")),
+            "expression" | "constant_expression" => {
+                docs.push(fmt_expr(
+                    f,
+                    child,
+                    &crate::formatter::expressions::ExprCtx::default(),
+                ));
+            }
+            "action_block" => {
+                // action_block：`[else statement]` 或 `[statement]`
+                let mut sub_body: Option<CstNode<'_>> = None;
+                let mut block_else = false;
+                for sub in child.children() {
+                    if sub.kind() == "else" {
+                        block_else = true;
+                    } else if sub.is_named() {
+                        sub_body = Some(sub);
+                    }
+                }
+                if block_else {
+                    docs.push(Doc::Space);
+                    docs.push(Doc::text("else"));
+                }
+                if let Some(b) = sub_body {
+                    let inner = unwrap_statement(f, b);
+                    if inner.kind() == "seq_block" {
+                        docs.push(Doc::Space);
+                        docs.push(fmt_seq_block(f, inner));
+                    } else if block_else {
+                        docs.push(Doc::Newline);
+                        docs.push(Doc::Indent);
+                        docs.push(f.fmt(b));
+                        docs.push(Doc::Dedent);
+                    } else {
+                        docs.push(Doc::Space);
+                        docs.push(f.fmt(b));
+                    }
+                }
+            }
+            _ => {
+                if child.is_named() {
+                    docs.push(f.fmt(child));
+                } else {
+                    docs.push(Doc::text(child.text()));
+                }
+            }
+        }
+    }
+    Doc::concat(docs)
 }
 
 /// case_statement。

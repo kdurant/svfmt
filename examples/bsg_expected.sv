@@ -5,7 +5,7 @@
 
 `include "bsg_manycore_defines.svh"
 
-module bsg_manycore_endpointimport bsg_manycore_pkg::*; #
+module bsg_manycore_endpoint import bsg_manycore_pkg::*; #
 (
     localparam packet_width_lp = `bsg_manycore_packet_width(addr_width_p,data_width_p,x_cord_width_p,y_cord_width_p)
 )
@@ -124,7 +124,7 @@ begin
 
     if(~reset_i & ~returned_fifo_ready)
         assert(return_packet_yumi_i) else
-                $error("[BSG_ERROR] return fifo has to be dequeued, when it's full.");
+            $error("[BSG_ERROR] return fifo has to be dequeued, when it's full.");
 
 end
 

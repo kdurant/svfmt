@@ -446,6 +446,5 @@ fn parameter_connections_nodes<'a>(_f: &Formatter<'a>, node: CstNode<'a>) -> Vec
 }
 
 fn render_doc(f: &Formatter<'_>, doc: crate::document::Doc) -> String {
-    let opts = crate::document::RenderOptions::from(f.cfg);
-    crate::document::render(&doc, &opts)
+    crate::document::render_inline(&doc, f.cfg)
 }

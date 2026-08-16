@@ -27,6 +27,10 @@ pub enum Doc {
     Group(Vec<Doc>),
     /// 软换行点：组内超宽时断行，否则当作一个空格。
     SoftLine,
+    /// 软换行点（无空隙）：组内超宽时断行，否则不输出任何内容。
+    /// 用于"单行时无空格、超宽时换行"的位置（如函数调用 `(` 之后：
+    /// `$display("...")` 单行时 `(` 后无空格）。
+    SoftLineNil,
     /// 无输出。
     Nil,
 }
@@ -142,6 +146,9 @@ impl Renderer<'_> {
                 self.out.push(' ');
                 self.column += 1;
             }
+            Doc::SoftLineNil => {
+                // flat 模式：不输出任何内容（单行时无空格）。
+            }
         }
     }
 
@@ -159,7 +166,7 @@ impl Renderer<'_> {
         } else {
             for c in children {
                 match c {
-                    Doc::SoftLine => self.newline(),
+                    Doc::SoftLine | Doc::SoftLineNil => self.newline(),
                     _ => self.emit(c),
                 }
             }
@@ -255,7 +262,7 @@ struct RendererPart<'a> {
 impl RendererPart<'_> {
     fn emit(&mut self, doc: &Doc) {
         match doc {
-            Doc::Nil | Doc::Indent | Doc::Dedent => {}
+            Doc::Nil | Doc::Indent | Doc::Dedent | Doc::SoftLineNil => {}
             Doc::Text(s) => self.column += display_width(s),
             Doc::Space | Doc::SoftLine => self.column += 1,
             Doc::Newline | Doc::BlankLines(_) => {
@@ -293,6 +300,17 @@ pub fn render_sequence(docs: &[Doc], options: &RenderOptions) -> String {
         Doc::Group(docs.to_vec())
     };
     render(&doc, options)
+}
+
+/// 对齐渲染：用于对齐段 / 实例连接列宽的中间渲染，**强制单行**（column_limit=0）。
+///
+/// 对齐依赖单行文本来计算列宽；若 column_limit 让内部 SoftLine 断行，会得到
+/// 多行字符串，破坏对齐段的结构（见 examples/hdmi.sv：断行 RHS 使后续行错乱
+/// 并级联出 ERROR 节点、破坏幂等性）。
+pub fn render_inline(doc: &Doc, cfg: &FormatterConfig) -> String {
+    let mut opts = RenderOptions::from(cfg);
+    opts.column_limit = 0;
+    render(doc, &opts)
 }
 
 /// 追加文本到 String（实现 fmt::Write）。

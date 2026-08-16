@@ -186,6 +186,7 @@ impl<'a> Formatter<'a> {
             "conditional_statement" => statements::fmt_conditional(self, node),
             "case_statement" => statements::fmt_case_statement(self, node),
             "case_item" => statements::fmt_case_item(self, node, &[]),
+            "simple_immediate_assert_statement" => statements::fmt_assert(self, node),
             "loop_statement" => statements::fmt_loop_statement(self, node),
             "generate_region" | "generate_block" => statements::fmt_generate(self, node),
             "loop_generate_construct" | "conditional_generate_construct" => {
@@ -210,6 +211,11 @@ impl<'a> Formatter<'a> {
             | "assignment_expression"
             | "variable_assignment"
             | "net_assignment" => {
+                expressions::fmt_expr(self, node, &expressions::ExprCtx::default())
+            }
+            // 调用类节点：经 fmt_expr/fmt_call 处理（支持 column_limit 断行，
+            // 并规范化参数空格）。此前这些节点走 raw 原文输出。
+            "subroutine_call_statement" | "subroutine_call" | "system_tf_call" | "tf_call" => {
                 expressions::fmt_expr(self, node, &expressions::ExprCtx::default())
             }
             _ if node.kind().ends_with("comment") => self.fmt_comment(node),
@@ -307,12 +313,14 @@ pub fn count_blank_lines(ws: &str) -> usize {
     nl.saturating_sub(1)
 }
 
-/// 判断 Doc 是否以 `;` 结尾（遍历最后一个 Text）。
+/// 判断 Doc 是否以 `;` 结尾（逆序遍历找到最后一个 Text）。
 fn ends_with_semi(doc: &Doc) -> bool {
     fn last_text(doc: &Doc) -> Option<&str> {
         match doc {
             Doc::Text(s) => Some(s),
-            Doc::Group(children) => children.last().and_then(last_text),
+            // 逆序查找最后一个 Text：跳过末尾的 Indent/Dedent/Newline 等
+            // 非文本元素（如 fmt_assert 的结构化输出以 Dedent 结尾）。
+            Doc::Group(children) => children.iter().rev().find_map(last_text),
             _ => None,
         }
     }

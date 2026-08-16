@@ -99,20 +99,39 @@ end
 # 行
 
 ## column_limit
-每行最大列数（字符数）。超过后格式化器将尽量在运算符、逗号等位置换行。
+每行最大列数（字符数）。超过后格式化器将在可断行点换行：
+- **函数调用 / 系统任务调用的参数**（左括号后、逗号后）
+- **结构化表达式**（二元运算符前、逗号后）
+
+注意：**对齐段**（模块体连续赋值、seq_block 赋值段、实例端口连接）依赖单行
+文本计算列宽，为保持对齐结构稳定，其 RHS **不受 column_limit 影响**（始终单行）。
 
 - 默认： 0
-- 可选值： 0（不限制）
+- 可选值： 0（不限制）或正整数
 
 ### column_limit: 40
 ```verilog
-assign result = a + b + c +
-    d + e + f;
+initial
+begin
+    $display(
+        "very long format string %d %d",
+        a,
+        b,
+        c);
+end
 ```
 
 ### column_limit: 0
 ```verilog
-assign result = a + b + c + d + e + f;
+initial
+begin
+    $display("very long format string %d %d", a, b, c);
+end
+```
+
+### 对齐段保持单行（不受 column_limit 影响）
+```verilog
+assign y = a + b + c + d + e + f + g + h + i + j + k;
 ```
 
 ## trim_trailing_whitespace
