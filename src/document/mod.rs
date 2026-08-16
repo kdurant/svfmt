@@ -39,8 +39,33 @@ impl Doc {
     pub fn text(s: impl Into<String>) -> Doc {
         Doc::Text(s.into())
     }
+    /// 拼接一组 Doc，做组合子优化：
+    /// - 过滤 [`Doc::Nil`]（无输出）
+    /// - 合并相邻的 [`Doc::Text`]（减少渲染时的分段处理）
+    /// - 单元素时展开为元素本身（减少一层无意义的 `Group` 嵌套）
+    ///
+    /// 注意：**不做内嵌 `Group` 扁平化**——`Group` 是 `column_limit` 断行的
+    /// 决策单元，拍平会改变断行粒度（嵌套 `Group` 各自试排）。
     pub fn concat(docs: Vec<Doc>) -> Doc {
-        Doc::Group(docs)
+        let mut out: Vec<Doc> = Vec::with_capacity(docs.len());
+        for d in docs {
+            match d {
+                Doc::Nil => {}
+                Doc::Text(s) => {
+                    if let Some(Doc::Text(prev)) = out.last_mut() {
+                        prev.push_str(&s);
+                    } else {
+                        out.push(Doc::Text(s));
+                    }
+                }
+                other => out.push(other),
+            }
+        }
+        match out.len() {
+            0 => Doc::Nil,
+            1 => out.pop().expect("len==1 必有元素"),
+            _ => Doc::Group(out),
+        }
     }
 }
 
@@ -76,7 +101,6 @@ pub fn render(doc: &Doc, options: &RenderOptions) -> String {
         column: 0,
         out: String::new(),
         pending_newline: true,
-        blank_lines: 0,
     };
     renderer.emit(doc);
     renderer.out
@@ -89,8 +113,6 @@ struct Renderer<'a> {
     out: String,
     /// 是否位于行首（换行后尚未输出任何非空白内容）。
     pending_newline: bool,
-    #[allow(dead_code)]
-    blank_lines: usize,
 }
 
 impl Renderer<'_> {
@@ -239,17 +261,11 @@ impl Renderer<'_> {
             if !part.is_empty() {
                 self.write_indent();
                 self.out.push_str(part);
-                self.column += display_width(part);
+                self.column += display_width(part, self.options.tab_width);
                 self.pending_newline = false;
             }
             first = false;
         }
-    }
-
-    /// 原文空白包含换行时，在行首补缩进。
-    #[allow(dead_code)]
-    fn write_indent_for_inline(&mut self) {
-        let _ = self;
     }
 }
 
@@ -263,7 +279,7 @@ impl RendererPart<'_> {
     fn emit(&mut self, doc: &Doc) {
         match doc {
             Doc::Nil | Doc::Indent | Doc::Dedent | Doc::SoftLineNil => {}
-            Doc::Text(s) => self.column += display_width(s),
+            Doc::Text(s) => self.column += display_width(s, self.options.tab_width),
             Doc::Space | Doc::SoftLine => self.column += 1,
             Doc::Newline | Doc::BlankLines(_) => {
                 self.column = self.options.indent_width.saturating_mul(0);
@@ -277,19 +293,19 @@ impl RendererPart<'_> {
     }
 }
 
-/// 计算字符串在终端上的显示宽度（CJK 字符按 2 列计）。
-pub fn display_width(s: &str) -> usize {
-    s.chars()
-        .map(|c| {
-            if c == '\t' {
-                4
-            } else if (c as u32) > 0x2e80 {
-                2
-            } else {
-                1
-            }
-        })
-        .sum()
+/// 计算字符串在终端上的显示宽度（CJK 字符按 2 列计，tab 按 `tab_width`）。
+pub fn display_width(s: &str, tab_width: usize) -> usize {
+    let mut width = 0;
+    for c in s.chars() {
+        if c == '\t' {
+            width += tab_width;
+        } else if (c as u32) > 0x2e80 {
+            width += 2;
+        } else {
+            width += 1;
+        }
+    }
+    width
 }
 
 /// 把 Doc 序列拼接渲染。

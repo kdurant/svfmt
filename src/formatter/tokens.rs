@@ -80,20 +80,9 @@ pub fn inline_whitespace(ws: &str) -> &str {
     ws
 }
 
-/// 字符显示宽度（CJK 按 2 列计，tab 按 tab_width）。
-pub fn display_width(s: &str, tab_width: usize) -> usize {
-    let mut width = 0;
-    for c in s.chars() {
-        if c == '\t' {
-            width += tab_width;
-        } else if (c as u32) > 0x2e80 {
-            width += 2;
-        } else {
-            width += 1;
-        }
-    }
-    width
-}
+// 字符显示宽度统一实现在 document 层（CJK 按 2 列计，tab 按 tab_width）。
+// 在此 re-export，保持 `crate::formatter::tokens::display_width` 调用点不变。
+pub use crate::document::display_width;
 
 #[cfg(test)]
 mod tests {

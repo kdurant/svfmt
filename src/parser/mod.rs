@@ -33,10 +33,6 @@ pub enum SvParserError {
     /// tree-sitter 内部解析失败。
     #[error("tree-sitter 解析失败: {0}")]
     ParseFailed(String),
-    /// 源码含非法 UTF-8 字节。
-    #[error("源码不是合法的 UTF-8 文本")]
-    #[allow(dead_code)]
-    InvalidUtf8,
 }
 
 impl SvParser {
@@ -63,12 +59,6 @@ impl SvParser {
             .ok_or_else(|| SvParserError::ParseFailed("parser 未设置 language".into()))?;
         Ok(CstTree::new(tree, source))
     }
-}
-
-/// 获取 grammar 中的 SystemVerilog 节点类型集合（用于打印时的引用计数表）。
-#[allow(dead_code)]
-pub fn language() -> Language {
-    tree_sitter_systemverilog::LANGUAGE.into()
 }
 
 /// 递归收集树中所有 `ERROR` 节点。
@@ -119,7 +109,6 @@ pub struct CstNode<'tree> {
     pub(crate) source: &'tree str,
 }
 
-#[allow(dead_code)] // 以下方法为 Formatter 阶段预留的公共遍历 API
 impl<'tree> CstNode<'tree> {
     pub(crate) fn new(inner: Node<'tree>, source: &'tree str) -> Self {
         CstNode { inner, source }

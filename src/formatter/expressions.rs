@@ -632,11 +632,6 @@ fn to_token<'a>(_f: &Formatter<'a>, node: CstNode<'a>) -> Token<'a> {
     }
 }
 
-#[allow(dead_code)]
-fn first_token<'a>(_f: &Formatter<'a>, node: CstNode<'a>) -> Option<Token<'a>> {
-    leaf_tokens(node).first().copied()
-}
-
 fn fmt_unary(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
     let mut docs: Vec<Doc> = Vec::new();
     for child in node.children_iter() {

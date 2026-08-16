@@ -27,20 +27,8 @@ impl<'a> CstTree<'a> {
         CstNode::new(self.tree.root_node(), self.source)
     }
 
-    /// 原始源码文本。
-    #[allow(dead_code)] // Formatter 阶段使用
-    pub fn source(&self) -> &str {
-        self.source
-    }
-
     /// 整棵树是否包含任何 `ERROR` / `MISSING` 节点。
     pub fn has_error(&self) -> bool {
         self.tree.root_node().has_error()
-    }
-
-    /// 回收后的内部 tree 引用（仅供 tree-sitter API 高级用法）。
-    #[allow(dead_code)]
-    pub fn raw_tree(&self) -> &Tree {
-        &self.tree
     }
 }
