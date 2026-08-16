@@ -8,7 +8,7 @@ use crate::parser::CstNode;
 
 /// module_instantiation。
 pub fn fmt_module_instantiation(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
-    if std::env::var("SVDBG").is_ok() {
+    if f.svdbg() {
         eprintln!("[MI] text={:?}", node.text().split('\n').next());
     }
     let items: Vec<CstNode<'_>> = node.children();
@@ -53,7 +53,7 @@ pub fn fmt_module_instantiation(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     // 参数与端口共享 name/value 对齐列
     let mut shared_name_max = 0usize;
     let mut shared_value_max = 0usize;
-    if std::env::var("SVDBG").is_ok() {
+    if f.svdbg() {
         eprintln!("[inst2] type={:?}", type_name);
     }
     if let Some(p) = params {
@@ -190,7 +190,7 @@ fn fmt_inline_connections(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     let mut docs: Vec<Doc> = Vec::new();
     let mut first = true;
     let prev_end: Option<usize> = None;
-    for c in node.children() {
+    for c in node.children_iter() {
         if c.is_named() {
             if !first {
                 docs.push(Doc::Space);
@@ -271,7 +271,7 @@ fn aligned_connections(
     let wrap = f.cfg.wrap_instance_ports as usize;
     let single_line =
         !f.cfg.module.newline_per_instance_port || (wrap >= 1 && parsed.len() <= wrap);
-    if std::env::var("SVDBG").is_ok() {
+    if f.svdbg() {
         eprintln!(
             "[aligned2] name_max={} value_max={} extra={}",
             name_max, value_max, value_pad_extra
@@ -356,7 +356,7 @@ fn connection_columns(f: &Formatter<'_>, node: CstNode<'_>) -> (String, String) 
     let mut name = String::new();
     let mut value = String::new();
     let mut in_value = false;
-    if std::env::var("SVDBG").is_ok() {
+    if f.svdbg() {
         eprintln!(
             "[conncols] node_kind={} items={:?}",
             node.kind(),

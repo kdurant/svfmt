@@ -231,7 +231,7 @@ fn emit_aligned_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs: &mut Vec<D
         ) || (matches!(n.kind(), "data_declaration" | "net_declaration") && n.text().contains('='))
     });
     if has_eq {
-        if std::env::var("SVDBG").is_ok() {
+        if f.svdbg() {
             eprintln!(
                 "[eq-seg] kinds={:?}",
                 seg.iter().map(|n| n.kind()).collect::<Vec<_>>()
@@ -264,7 +264,7 @@ fn emit_aligned_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs: &mut Vec<D
         }
     }
     // 对齐
-    if std::env::var("SVDBG").is_ok() {
+    if f.svdbg() {
         eprintln!(
             "[seg] kinds={:?}",
             seg.iter().map(|s| s.kind()).collect::<Vec<_>>()
@@ -465,9 +465,9 @@ fn declaration_columns(f: &Formatter<'_>, node: CstNode<'_>) -> Vec<String> {
 fn assign_columns(f: &Formatter<'_>, node: CstNode<'_>) -> Vec<String> {
     let mut lhs = String::new();
     let mut rhs_text = String::new();
-    for c in node.children() {
+    for c in node.children_iter() {
         if c.kind() == "list_of_net_assignments" || c.kind() == "list_of_variable_assignments" {
-            for sub in c.children() {
+            for sub in c.children_iter() {
                 if sub.is_named() {
                     let cols = assignment_columns(f, sub);
                     lhs = cols.0;
@@ -483,7 +483,7 @@ fn assign_columns(f: &Formatter<'_>, node: CstNode<'_>) -> Vec<String> {
 fn assignment_columns(f: &Formatter<'_>, node: CstNode<'_>) -> (String, String) {
     let mut lhs = String::new();
     let mut rhs_parts: Vec<CstNode<'_>> = Vec::new();
-    for c in node.children() {
+    for c in node.children_iter() {
         if c.kind() == "=" || c.kind() == "<=" {
             continue;
         }

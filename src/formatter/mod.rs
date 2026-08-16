@@ -22,9 +22,23 @@ pub struct Formatter<'a> {
     pub src: &'a str,
 }
 
+/// 是否启用 SVDBG 调试输出。
+///
+/// 用 `OnceLock` 缓存环境变量查询结果：SVDBG 在热路径被大量判断，
+/// 直接 `env::var` 会在每个节点都触发系统调用，改为全局只查询一次。
+pub fn svdbg() -> bool {
+    static SVDBG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *SVDBG.get_or_init(|| std::env::var_os("SVDBG").is_some())
+}
+
 impl<'a> Formatter<'a> {
     pub fn new(cfg: &'a FormatterConfig, src: &'a str) -> Self {
         Formatter { cfg, src }
+    }
+
+    /// 是否启用 SVDBG 调试输出。
+    pub fn svdbg(&self) -> bool {
+        svdbg()
     }
 
     /// 解析并格式化源码。
@@ -162,7 +176,7 @@ impl<'a> Formatter<'a> {
     // ---------- dispatch ----------
 
     pub fn fmt(&self, node: CstNode<'_>) -> Doc {
-        if std::env::var("SVDBG").is_ok() {
+        if self.svdbg() {
             eprintln!("[fmt] kind={}", node.kind());
         }
         match node.kind() {
@@ -231,10 +245,9 @@ impl<'a> Formatter<'a> {
 
     /// 顶层 source_file：逐项格式化，保留空行。
     fn fmt_source_file(&self, node: CstNode<'_>) -> Doc {
-        let children = node.children();
         let mut docs: Vec<Doc> = Vec::new();
         let mut prev_end: Option<usize> = None;
-        for child in children {
+        for child in node.children_iter() {
             let start = child.byte_range().start;
             if let Some(pe) = prev_end {
                 let ws = self.ws(pe, start);

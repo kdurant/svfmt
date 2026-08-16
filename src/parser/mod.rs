@@ -54,12 +54,14 @@ impl SvParser {
     ///
     /// 语法错误不会被当作失败返回：tree-sitter 会在树中产生 `ERROR` 节点，
     /// 通过 [`CstTree::has_error`] 和 [`CstNode::is_error`] 检查即可。
-    pub fn parse(&mut self, source: &str) -> Result<CstTree, SvParserError> {
+    ///
+    /// 返回的 [`CstTree`] 借用调用方持有的 `source`（不复制源码）。
+    pub fn parse<'a>(&mut self, source: &'a str) -> Result<CstTree<'a>, SvParserError> {
         let tree = self
             .parser
             .parse(source, None)
             .ok_or_else(|| SvParserError::ParseFailed("parser 未设置 language".into()))?;
-        Ok(CstTree::new(tree, source.to_owned()))
+        Ok(CstTree::new(tree, source))
     }
 }
 
@@ -82,8 +84,31 @@ fn collect_error_nodes_rec<'tree>(node: CstNode<'tree>, out: &mut Vec<CstNode<'t
     if node.is_error() || node.kind() == "ERROR" {
         out.push(node);
     }
-    for child in node.children() {
+    for child in node.children_iter() {
         collect_error_nodes_rec(child, out);
+    }
+}
+
+/// 零分配的直接子节点迭代器（基于 [`tree_sitter::TreeCursor`]）。
+///
+/// 由 [`CstNode::children_iter`] 创建，顺序产出一个节点的所有直接子节点
+/// （含 anonymous token），避免 `children()` 每次 collect `Vec`。
+pub struct ChildrenIter<'tree> {
+    cursor: tree_sitter::TreeCursor<'tree>,
+    source: &'tree str,
+    /// 是否已产出过首个元素。
+    started: bool,
+}
+
+impl<'tree> Iterator for ChildrenIter<'tree> {
+    type Item = CstNode<'tree>;
+    fn next(&mut self) -> Option<CstNode<'tree>> {
+        if !self.started {
+            self.started = true;
+        } else if !self.cursor.goto_next_sibling() {
+            return None;
+        }
+        Some(CstNode::new(self.cursor.node(), self.source))
     }
 }
 
@@ -178,6 +203,21 @@ impl<'tree> CstNode<'tree> {
             .collect()
     }
 
+    /// 所有直接子节点，**零分配迭代**（基于 TreeCursor）。
+    ///
+    /// 用于单次顺序遍历的热路径（如 `leaf_tokens`、表达式递归），
+    /// 避免 `children()` 每次 collect 一个 `Vec`。需要索引/多次访问时仍用
+    /// [`CstNode::children`]。
+    pub fn children_iter(&self) -> ChildrenIter<'tree> {
+        let mut cursor = self.inner.walk();
+        let has_child = cursor.goto_first_child();
+        ChildrenIter {
+            cursor,
+            source: self.source,
+            started: !has_child,
+        }
+    }
+
     /// 所有 named 直接子节点。
     pub fn named_children(&self) -> Vec<CstNode<'tree>> {
         let mut cursor = self.inner.walk();
@@ -225,7 +265,7 @@ impl<'tree> std::fmt::Debug for CstNode<'tree> {
 mod tests {
     use super::*;
 
-    fn parse(source: &str) -> (SvParser, CstTree) {
+    fn parse(source: &str) -> (SvParser, CstTree<'_>) {
         let mut p = SvParser::new().expect("grammar 应可加载");
         let tree = p.parse(source).expect("解析应成功");
         (p, tree)

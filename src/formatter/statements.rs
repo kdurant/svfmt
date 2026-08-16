@@ -232,7 +232,7 @@ fn fmt_seq_block_body(f: &Formatter<'_>, body_nodes: &[CstNode<'_>]) -> Vec<Doc>
         let blank_before = prev_end
             .map(|pe| crate::formatter::count_blank_lines(f.ws(pe, node.byte_range().start)) > 0)
             .unwrap_or(false);
-        if std::env::var("SVDBG").is_ok() {
+        if f.svdbg() {
             eprintln!(
                 "[seqbody] kind={} blank_before={}",
                 node.kind(),
@@ -240,7 +240,7 @@ fn fmt_seq_block_body(f: &Formatter<'_>, body_nodes: &[CstNode<'_>]) -> Vec<Doc>
             );
         }
         let is_assign = is_assignment_stmt(f, *node);
-        if std::env::var("SVDBG").is_ok() {
+        if f.svdbg() {
             eprintln!(
                 "[seqbody] kind={} is_assign={} text={:?}",
                 node.kind(),
@@ -359,7 +359,7 @@ fn emit_assign_segment(
                 max_lhs = w;
             }
             rows.push((lhs, op, rhs));
-        } else if std::env::var("SVDBG").is_ok() {
+        } else if f.svdbg() {
             eprintln!(
                 "[assign-seg] DROPPED inner_kind={} text={:?}",
                 inner.kind(),
@@ -377,7 +377,7 @@ fn emit_assign_segment(
         })
         .max()
         .unwrap_or(0);
-    if std::env::var("SVDBG").is_ok() {
+    if f.svdbg() {
         eprintln!(
             "[assign-seg] rows={:?} max_lhs={} op_col={}",
             rows.iter()
@@ -486,7 +486,7 @@ fn assignment_columns(node: CstNode<'_>) -> Option<(String, String, CstNode<'_>)
     if node.kind() == "blocking_assignment" {
         if let Some(oa) = node.find_named_child("operator_assignment") {
             node = oa;
-        } else if std::env::var("SVDBG").is_ok() {
+        } else if crate::formatter::svdbg() {
             eprintln!(
                 "[assign-cols] operator_assignment NOT FOUND, children={:?}",
                 node.children().iter().map(|c| c.kind()).collect::<Vec<_>>()
@@ -496,7 +496,7 @@ fn assignment_columns(node: CstNode<'_>) -> Option<(String, String, CstNode<'_>)
     let mut lhs = String::new();
     let mut op = String::new();
     let mut rhs: Option<CstNode<'_>> = None;
-    for c in node.children() {
+    for c in node.children_iter() {
         if c.kind() == "=" || c.kind() == "<=" || c.kind() == "assignment_operator" {
             op = c.text().to_string();
         } else if op.is_empty() {
@@ -505,7 +505,7 @@ fn assignment_columns(node: CstNode<'_>) -> Option<(String, String, CstNode<'_>)
             rhs = Some(c);
         }
     }
-    if std::env::var("SVDBG").is_ok() && node.kind() == "operator_assignment" {
+    if crate::formatter::svdbg() && node.kind() == "operator_assignment" {
         eprintln!(
             "[assign-cols] oa children={:?} lhs={:?} op={:?} rhs_is={}",
             node.children().iter().map(|c| c.kind()).collect::<Vec<_>>(),
@@ -516,7 +516,7 @@ fn assignment_columns(node: CstNode<'_>) -> Option<(String, String, CstNode<'_>)
     }
     let rhs = rhs?;
     if op.is_empty() {
-        if std::env::var("SVDBG").is_ok() {
+        if crate::formatter::svdbg() {
             eprintln!("[assign-cols] op empty, lhs={:?}", lhs);
         }
         return None;
@@ -803,7 +803,7 @@ pub fn fmt_body(f: &Formatter<'_>, node: CstNode<'_>, _depth: usize) -> Doc {
 /// ```
 pub fn fmt_assert(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     let mut docs: Vec<Doc> = Vec::new();
-    for child in node.children() {
+    for child in node.children_iter() {
         match child.kind() {
             "assert" => docs.push(Doc::text("assert")),
             "(" => docs.push(Doc::text("(")),
@@ -1114,7 +1114,7 @@ pub fn fmt_case_statement(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
 /// case_item 的 body 风格："inline"（单语句同行）/ "seq" / "cond"。
 fn case_item_body_style(f: &Formatter<'_>, node: CstNode<'_>) -> &'static str {
     let mut seen_colon = false;
-    for c in node.children() {
+    for c in node.children_iter() {
         if c.kind() == ":" {
             seen_colon = true;
             continue;
@@ -1257,7 +1257,7 @@ pub fn fmt_loop_statement(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
         let c = items[i];
         match c.kind() {
             "for" => {
-                if std::env::var("SVDBG").is_ok() {
+                if f.svdbg() {
                     eprintln!("[loop] FOR");
                 }
                 docs.push(Doc::text("for"));
@@ -1267,7 +1267,7 @@ pub fn fmt_loop_statement(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                 i += 1;
             }
             "(" => {
-                if std::env::var("SVDBG").is_ok() {
+                if f.svdbg() {
                     eprintln!("[loop] OPEN");
                 }
                 docs.push(Doc::text("("));
@@ -1333,7 +1333,7 @@ pub fn fmt_seq_block_with_label(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
         idx = 1;
     }
     // `: label`
-    if std::env::var("SVDBG").is_ok() {
+    if f.svdbg() {
         eprintln!(
             "[blk] children={:?}",
             children.iter().map(|c| c.kind()).collect::<Vec<_>>()
@@ -1349,7 +1349,7 @@ pub fn fmt_seq_block_with_label(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
         }
     }
     let has_label = has_colon_label(&children);
-    if std::env::var("SVDBG").is_ok() {
+    if f.svdbg() {
         eprintln!("[blk] has_label={}", has_label);
     }
     let body_nodes: Vec<CstNode<'_>> = children

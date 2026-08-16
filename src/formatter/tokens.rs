@@ -26,8 +26,13 @@ fn collect<'a, 'tree>(node: CstNode<'tree>, out: &mut Vec<Token<'tree>>)
 where
     'tree: 'a,
 {
-    let children = node.children();
-    if children.is_empty() {
+    // 零分配遍历子节点（热路径：每个节点递归收集叶子）
+    let mut has_child = false;
+    for c in node.children_iter() {
+        has_child = true;
+        collect(c, out);
+    }
+    if !has_child {
         // 跳过 MISSING 空 token（如孤立反引号 ` 后缺失的宏名）。
         // 这类 token 源中没有文本（text 为空），输出它们会让 `fmt_default`
         // 的间隔规则在错误的位置插入空格（如 `prev.kind == "`" → Space），
@@ -46,10 +51,6 @@ where
             kind: node.kind(),
             is_comment: node.kind().ends_with("comment"),
         });
-    } else {
-        for c in children {
-            collect(c, out);
-        }
     }
 }
 

@@ -341,7 +341,7 @@ pub fn token_sep(f: &Formatter<'_>, prev: Option<&Token>, cur: &Token, ctx: &Exp
         }
         // 二元运算符
         if is_binary_op(cur.kind) || is_binary_op(prev.kind) {
-            if std::env::var("SVDBG").is_ok() && (cur.kind == "*" || prev.kind == "*") {
+            if f.svdbg() && (cur.kind == "*" || prev.kind == "*") {
                 eprintln!(
                     "[sep*] cur={} prev={} packed={}",
                     cur.kind, prev.kind, ctx.in_packed_dim
@@ -439,7 +439,7 @@ fn apply_sep(f: &Formatter<'_>, docs: &mut Vec<Doc>, prev: &Token, cur: &Token, 
 /// 递归格式化一个值/表达式节点。
 pub fn fmt_expr(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
     let kind = node.kind();
-    if std::env::var("SVDBG").is_ok() {
+    if f.svdbg() {
         eprintln!(
             "[expr] kind={} text={:?}",
             kind,
@@ -455,7 +455,7 @@ pub fn fmt_expr(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
             let mut docs = vec![Doc::text("(")];
             let mut inner_ctx = *ctx;
             inner_ctx.in_packed_dim = false;
-            for child in node.children() {
+            for child in node.children_iter() {
                 docs.push(fmt_child_or_token(f, child, &inner_ctx));
             }
             docs.push(Doc::text(")"));
@@ -520,7 +520,7 @@ fn is_container_expr(kind: &str) -> bool {
 
 /// 递归遍历子节点：named 递归表达式，anonymous 用间隔规则。
 fn fmt_children_expr(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
-    if std::env::var("SVDBG").is_ok() && node.kind() == "expression" {
+    if f.svdbg() && node.kind() == "expression" {
         eprintln!(
             "[childexpr] text={:?} ctx.packed={}",
             node.text(),
@@ -529,7 +529,7 @@ fn fmt_children_expr(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc
     }
     let mut docs: Vec<Doc> = Vec::new();
     let mut prev: Option<Token> = None;
-    for child in node.children() {
+    for child in node.children_iter() {
         if child.is_named() {
             let d = fmt_expr(f, child, ctx);
             if let Some(p) = prev {
@@ -592,10 +592,9 @@ fn fmt_child_or_token(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Do
 }
 
 fn fmt_binary(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
-    let children = node.children();
     let mut docs: Vec<Doc> = Vec::new();
     let mut prev: Option<Token> = None;
-    for child in children {
+    for child in node.children_iter() {
         if child.is_named() {
             let d = fmt_expr(f, child, ctx);
             docs.push(d);
@@ -640,7 +639,7 @@ fn first_token<'a>(_f: &Formatter<'a>, node: CstNode<'a>) -> Option<Token<'a>> {
 
 fn fmt_unary(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
     let mut docs: Vec<Doc> = Vec::new();
-    for child in node.children() {
+    for child in node.children_iter() {
         if child.is_named() {
             docs.push(fmt_expr(f, child, ctx));
         } else {
@@ -657,7 +656,7 @@ fn fmt_unary(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
 fn fmt_ternary(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
     let mut docs: Vec<Doc> = Vec::new();
     let mut prev: Option<Token> = None;
-    for child in node.children() {
+    for child in node.children_iter() {
         if child.is_named() {
             if let Some(p) = prev
                 && let Some(tok) = first_token_of(child)
@@ -683,7 +682,7 @@ fn fmt_ternary(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
 }
 
 fn fmt_concat(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
-    if std::env::var("SVDBG").is_ok() {
+    if f.svdbg() {
         eprintln!(
             "[concat] children kinds: {:?}",
             node.children().iter().map(|c| c.kind()).collect::<Vec<_>>()
@@ -694,8 +693,7 @@ fn fmt_concat(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
     inner.in_packed_dim = false;
     let mut docs: Vec<Doc> = vec![Doc::text("{")];
     let mut prev: Option<Token> = None;
-    let children = node.children();
-    for child in children {
+    for child in node.children_iter() {
         if child.kind() == "{" || child.kind() == "}" {
             continue;
         }
@@ -724,7 +722,7 @@ fn fmt_concat(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
             let tok = to_token(f, child);
             if let Some(p) = prev {
                 let sep = token_sep(f, Some(&p), &tok, &inner);
-                if std::env::var("SVDBG").is_ok() {
+                if f.svdbg() {
                     eprintln!(
                         "[concat] prev={:?} cur={:?} sep={:?} in_concat={}",
                         p.text, tok.text, sep, inner.in_concat
@@ -741,7 +739,7 @@ fn fmt_concat(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
 }
 
 fn fmt_range(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
-    if std::env::var("SVDBG").is_ok() {
+    if f.svdbg() {
         eprintln!("[range] text={:?} ctx={:?}", node.text(), ctx.in_packed_dim);
     }
     // constant_range 内部无空格（如 [DATA_WIDTH-1:0]）
@@ -749,7 +747,7 @@ fn fmt_range(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
     inner.in_packed_dim = true;
     let mut docs: Vec<Doc> = Vec::new();
     let mut prev: Option<Token> = None;
-    for child in node.children() {
+    for child in node.children_iter() {
         if child.is_named() {
             docs.push(fmt_expr(f, child, &inner));
             if let Some(t) = last_token_of(child) {
@@ -775,7 +773,7 @@ fn fmt_dimension(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
     };
     let mut docs: Vec<Doc> = vec![Doc::text("[")];
     let mut prev: Option<Token> = None;
-    for child in node.children() {
+    for child in node.children_iter() {
         if child.is_named() {
             docs.push(fmt_expr(f, child, &inner));
             if let Some(t) = last_token_of(child) {
@@ -798,8 +796,7 @@ fn fmt_dimension(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
 fn fmt_call(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
     let mut docs: Vec<Doc> = Vec::new();
     let mut prev: Option<Token> = None;
-    let children = node.children();
-    for child in children {
+    for child in node.children_iter() {
         if child.is_named() {
             docs.push(fmt_expr(f, child, ctx));
             if let Some(t) = last_token_of(child) {
@@ -830,8 +827,7 @@ fn fmt_call(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
 pub fn fmt_assignment(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
     let mut docs: Vec<Doc> = Vec::new();
     let mut prev: Option<Token> = None;
-    let children = node.children();
-    for child in children {
+    for child in node.children_iter() {
         if child.is_named() {
             if let Some(p) = prev
                 && let Some(tok) = first_token_of(child)

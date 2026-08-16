@@ -8,26 +8,29 @@ use tree_sitter::Tree;
 use crate::parser::CstNode;
 
 /// tree-sitter CST 与原始源码的绑定。
-pub struct CstTree {
+///
+/// 借用调用方持有的源码（`&'a str`），避免 `to_owned` 复制整份源码
+/// （大文件内存翻倍）。
+pub struct CstTree<'a> {
     tree: Tree,
-    source: String,
+    source: &'a str,
 }
 
-impl CstTree {
+impl<'a> CstTree<'a> {
     /// 用已经解析好的 tree 与源码构造 CST 树。
-    pub(crate) fn new(tree: Tree, source: String) -> Self {
+    pub(crate) fn new(tree: Tree, source: &'a str) -> Self {
         CstTree { tree, source }
     }
 
     /// CST 根节点（`source_file`）。
     pub fn root_node(&self) -> CstNode<'_> {
-        CstNode::new(self.tree.root_node(), &self.source)
+        CstNode::new(self.tree.root_node(), self.source)
     }
 
     /// 原始源码文本。
     #[allow(dead_code)] // Formatter 阶段使用
     pub fn source(&self) -> &str {
-        &self.source
+        self.source
     }
 
     /// 整棵树是否包含任何 `ERROR` / `MISSING` 节点。
