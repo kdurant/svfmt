@@ -104,9 +104,7 @@ impl<'a> Formatter<'a> {
             .unwrap_or(0);
         // 是否为 `*` 标记风格：首个内部行剥掉公共缩进后以 `*` 开头
         let star_style = lines
-            .iter()
-            .skip(1)
-            .next()
+            .get(1)
             .map(|l| l[common.min(l.len())..].trim_start().starts_with('*'))
             .unwrap_or(false);
         let mut out = String::new();

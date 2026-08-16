@@ -1,7 +1,7 @@
 //! 语句布局：always/initial、seq_block、if/else、case、for、generate。
 
-pub mod case;
-pub mod control;
+mod case;
+mod control;
 
 use crate::document::Doc;
 use crate::formatter::Formatter;

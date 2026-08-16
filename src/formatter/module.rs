@@ -2,8 +2,8 @@
 //!
 //! 按职责拆分为子模块：`params`（模块头/参数列表）、`ports`（端口列表）。
 
-pub mod params;
-pub mod ports;
+mod params;
+mod ports;
 
 use crate::document::{Doc, render_inline};
 use crate::formatter::alignment::{align_rows, pad_to};
@@ -11,11 +11,11 @@ use crate::formatter::expressions::{ExprCtx, fmt_expr};
 use crate::formatter::tokens::{display_width, has_newline, leaf_tokens};
 use crate::formatter::{Formatter, count_blank_lines};
 use crate::parser::CstNode;
+use params::parameter_columns;
 
 // 子模块对外接口 re-export（dispatch 与跨模块引用统一经此路径）
 pub(crate) use params::{fmt_module_header, fmt_parameter_port_list};
 pub(crate) use ports::{fmt_cond_expression, fmt_port_list};
-use params::parameter_columns;
 
 /// module_declaration。
 pub fn fmt_module_declaration(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {

@@ -1,9 +1,8 @@
-
 //! if/else 链、语句体、断言语句布局。
 
 use crate::document::Doc;
-use crate::formatter::expressions::fmt_expr;
 use crate::formatter::Formatter;
+use crate::formatter::expressions::fmt_expr;
 use crate::parser::CstNode;
 
 use super::fmt_seq_block;
@@ -43,10 +42,8 @@ pub(crate) fn fmt_conditional(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                         pts.push((c.byte_range().start, c.byte_range().end, indent_w + w));
                     }
                 }
-                "else" => {
-                    if items.get(i + 1).map(|n| has_inline(*c, n)).unwrap_or(false) {
-                        pts.push((c.byte_range().start, c.byte_range().end, 4));
-                    }
+                "else" if items.get(i + 1).map(|n| has_inline(*c, n)).unwrap_or(false) => {
+                    pts.push((c.byte_range().start, c.byte_range().end, 4));
                 }
                 "cond_predicate" => {
                     let after = items.get(i + 1);
@@ -109,8 +106,8 @@ pub(crate) fn fmt_conditional(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
             if j > i {
                 let run_max = pts[i..=j].iter().map(|p| p.2).max().unwrap_or(0);
                 let target = run_max + 2;
-                for k in i..=j {
-                    targets[k] = Some(target);
+                for t in targets[i..=j].iter_mut() {
+                    *t = Some(target);
                 }
             }
             i = j + 1;

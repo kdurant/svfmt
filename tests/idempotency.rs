@@ -39,7 +39,10 @@ fn examples_match_expected_and_are_idempotent() {
         // ① 与 golden 一致
         let once = fmt(&src);
         let expected = std::fs::read_to_string(&expected_path).unwrap();
-        assert_eq!(once, expected, "文件 {name} 的输出与 {stem}_expected.sv 不一致");
+        assert_eq!(
+            once, expected,
+            "文件 {name} 的输出与 {stem}_expected.sv 不一致"
+        );
 
         // ② 幂等：二次格式化输出不变
         let twice = fmt(&once);
@@ -67,10 +70,7 @@ fn examples_are_idempotent_with_column_limit() {
     for entry in std::fs::read_dir(&examples).unwrap() {
         let path = entry.unwrap().path();
         let name = path.file_name().unwrap().to_str().unwrap().to_string();
-        if !name.ends_with(".sv")
-            || name.ends_with("_expected.sv")
-            || name.ends_with("_tmp.sv")
-        {
+        if !name.ends_with(".sv") || name.ends_with("_expected.sv") || name.ends_with("_tmp.sv") {
             continue;
         }
         let src = std::fs::read_to_string(&path).unwrap();

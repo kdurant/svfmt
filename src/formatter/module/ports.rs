@@ -1,11 +1,11 @@
 //! 端口列表布局。
 
 use crate::document::Doc;
+use crate::formatter::Formatter;
 use crate::formatter::alignment::pad_to;
 use crate::formatter::count_blank_lines;
 use crate::formatter::expressions::{ExprCtx, fmt_expr};
 use crate::formatter::tokens::{display_width, has_newline};
-use crate::formatter::Formatter;
 use crate::parser::CstNode;
 
 use super::pad_comment;

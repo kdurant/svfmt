@@ -1,10 +1,9 @@
-
 //! case 语句布局。
 
 use crate::document::Doc;
+use crate::formatter::Formatter;
 use crate::formatter::expressions::fmt_expr;
 use crate::formatter::tokens::has_newline;
-use crate::formatter::Formatter;
 use crate::parser::CstNode;
 
 use super::control::fmt_conditional;
@@ -138,8 +137,8 @@ pub(crate) fn fmt_case_statement(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                 run_max = s;
             }
         }
-        for k in i..=j {
-            align[k] = run_max;
+        for a in align[i..=j].iter_mut() {
+            *a = run_max;
         }
         i = j + 1;
     }

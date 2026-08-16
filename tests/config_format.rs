@@ -456,7 +456,7 @@ fn begin_end_on_newline() {
     cfg.begin_end_on_newline = false;
     let out = fmt(src, &cfg);
     assert!(
-        out.contains("begin\n") == false || !out.contains("posedge clk)\nbegin"),
+        !out.contains("begin\n") || !out.contains("posedge clk)\nbegin"),
         "begin 紧跟: {out}"
     );
     let out2 = fmt(src, &default_cfg());
@@ -473,7 +473,7 @@ fn else_on_newline() {
     cfg.else_on_newline = false;
     let out = fmt(src, &cfg);
     assert!(
-        out.contains("end\nelse") == false || !out.contains("\nelse\n"),
+        !out.contains("end\nelse") || !out.contains("\nelse\n"),
         "else 同行: {out}"
     );
     let out2 = fmt(src, &default_cfg());
