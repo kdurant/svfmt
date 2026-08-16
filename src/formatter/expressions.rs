@@ -234,7 +234,11 @@ pub fn token_sep(f: &Formatter<'_>, prev: Option<&Token>, cur: &Token, ctx: &Exp
             if ctx.in_concat {
                 return Sep::None;
             }
-            return if cfg.space.after_comma { Sep::Space } else { Sep::None };
+            return if cfg.space.after_comma {
+                Sep::Space
+            } else {
+                Sep::None
+            };
         }
         // 分号
         if cur.kind == ";" {
@@ -470,8 +474,13 @@ pub fn fmt_expr(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
             fmt_children_expr(f, node, &inner)
         }
         "packed_dimension" | "unpacked_dimension" => fmt_dimension(f, node, ctx),
-        "function_call" | "system_function_call" | "call" | "system_tf_call" | "tf_call"
-        | "subroutine_call" | "subroutine_call_statement" => fmt_call(f, node, ctx),
+        "function_call"
+        | "system_function_call"
+        | "call"
+        | "system_tf_call"
+        | "tf_call"
+        | "subroutine_call"
+        | "subroutine_call_statement" => fmt_call(f, node, ctx),
         "assignment_expression"
         | "blocking_assignment"
         | "nonblocking_assignment"

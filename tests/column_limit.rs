@@ -56,7 +56,8 @@ endmodule
     );
     // 参数（含字符串与后续实参）在新行缩进
     assert!(
-        out.lines().any(|l| l.trim_start().starts_with("\"long format string")),
+        out.lines()
+            .any(|l| l.trim_start().starts_with("\"long format string")),
         "首个参数应在新行: {out}"
     );
     assert!(
