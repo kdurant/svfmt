@@ -15,7 +15,6 @@ Authors:
 /*
  * AXI4-Stream GMII frame receiver (GMII in, AXI out)
  */
-
 module taxi_axis_gmii_rx #
 (
     parameter       DATA_W    = 8,

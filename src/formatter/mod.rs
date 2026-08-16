@@ -14,7 +14,7 @@ pub mod tokens;
 
 use crate::config::FormatterConfig;
 use crate::document::{Doc, RenderOptions, render};
-use crate::parser::{CstNode, SvParser};
+use crate::parser::{CstNode, SvParser, collect_error_nodes};
 
 /// 格式化器：持有配置与源码。
 pub struct Formatter<'a> {
@@ -43,12 +43,24 @@ impl<'a> Formatter<'a> {
 
     /// 解析并格式化源码。
     pub fn format_source(src: &str, cfg: &FormatterConfig) -> Result<String, FormatterError> {
+        Ok(Self::format_source_checked(src, cfg)?.0)
+    }
+
+    /// 解析并格式化源码，返回输出与语法错误节点数。
+    ///
+    /// 语法错误不会使格式化失败（tree-sitter 通过 ERROR/MISSING 节点恢复），
+    /// 但调用方可用错误数决定是否告警或以非零状态退出（`--fail-on-parse-error`）。
+    pub fn format_source_checked(
+        src: &str,
+        cfg: &FormatterConfig,
+    ) -> Result<(String, usize), FormatterError> {
         let mut parser = SvParser::new()?;
         let tree = parser.parse(src)?;
+        let error_count = collect_error_nodes(tree.root_node()).len();
         let formatter = Formatter::new(cfg, src);
         let doc = formatter.fmt(tree.root_node());
         let options = RenderOptions::from(cfg);
-        Ok(render(&doc, &options))
+        Ok((render(&doc, &options), error_count))
     }
 
     // ---------- 基础工具 ----------
@@ -262,10 +274,14 @@ impl<'a> Formatter<'a> {
             if !matches!(f, Doc::Nil) {
                 docs.push(f);
             }
-            // 记录"内容末尾"（不含行尾换行），使空白计算包含整行节点的换行
+            // 记录"内容末尾"（不含行尾换行），使空白计算包含整行节点的换行。
+            // 不能用 `rfind('\n')`：对不以换行结尾的多行节点（如
+            // `module a;\nendmodule`）会取到"最后一行之前的换行"，使 prev_end
+            // 指向节点内部，导致与下一节点之间的空白计算把最后一行内容也混入，
+            // 插入多余空行 / 拆散同行注释。
             let end = child.byte_range().end;
-            let content_end = if let Some(pos) = child.text().rfind('\n') {
-                start + pos
+            let content_end = if child.text().ends_with('\n') {
+                end.saturating_sub(1)
             } else {
                 end
             };

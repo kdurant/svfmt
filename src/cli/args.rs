@@ -37,6 +37,10 @@ pub struct Cli {
     #[arg(long, action = ArgAction::SetTrue)]
     pub cst: bool,
 
+    /// 源码存在语法错误时仍格式化（默认）；开启后以非零状态退出
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub fail_on_parse_error: bool,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }

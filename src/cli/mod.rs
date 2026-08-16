@@ -55,7 +55,14 @@ fn run_format(cli: &Cli) -> Result<(), CliError> {
         FormatterConfig::default()
     };
 
-    let formatted = Formatter::format_source(&source, &cfg)?;
+    let (formatted, error_count) = Formatter::format_source_checked(&source, &cfg)?;
+    if error_count > 0 {
+        let msg = format!("警告: 解析到 {error_count} 个语法错误节点，输出可能不完整");
+        if cli.fail_on_parse_error {
+            return Err(CliError::SyntaxErrors(error_count));
+        }
+        eprintln!("{msg}");
+    }
 
     // 输出
     if cli.in_place {
