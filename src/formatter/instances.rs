@@ -55,7 +55,7 @@ pub fn fmt_module_instantiation(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
 
     // 接口实例化：压缩为一行
     if is_interface_type(f, &type_name) {
-        return fmt_interface_one_line(f, node, &type_name, params, &inst_name, ports);
+        return fmt_interface_one_line(f, node, &type_name, params, &inst_name, ports, has_empty_parens);
     }
 
     let mut docs: Vec<Doc> = Vec::new();
@@ -171,6 +171,7 @@ fn fmt_interface_one_line(
     params: Option<CstNode<'_>>,
     inst_name: &str,
     ports: Option<CstNode<'_>>,
+    has_empty_parens: bool,
 ) -> Doc {
     let mut docs: Vec<Doc> = Vec::new();
     docs.push(Doc::text(type_name.to_string()));
@@ -192,6 +193,8 @@ fn fmt_interface_one_line(
             // 空端口 `()`
             docs.push(Doc::text("()"));
         }
+    } else if has_empty_parens {
+        docs.push(Doc::text("()"));
     }
     docs.push(Doc::text(";"));
     Doc::concat(docs)

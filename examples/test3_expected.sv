@@ -7,6 +7,8 @@ always
     #(1s / 100_000_000 / 2) clk = ~clk;
 
 eth_mii_bfm mii_bfm();
+if_spi_flash spi_flash_if();
+nor_flash nor_flash();
 
 flash_manage flash_manage_Ex01
 (
