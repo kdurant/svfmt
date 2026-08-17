@@ -108,6 +108,12 @@ begin
     endcase
 end
 
+if_axi_stream #(.DATA_WIDTH(8)) user_mux_if(); // 不同来源的用户数据经过复用后的数据
+if_axi_stream #(.DATA_WIDTH(8)) user_up_if(); // 按照协议封装后的数据
+if_axi_stream #(.DATA_WIDTH(8)) man_decode_if(); // 经过曼彻斯特解码后的数据
+if_axi_stream #(.DATA_WIDTH(8)) pmt_rx_if(); // 分离peer_status后，需要透传的数据
+if_axi_stream #(.DATA_WIDTH(8)) eth_up_if(); // 最终给以太网发送的数据
+
 endmodule
 
 

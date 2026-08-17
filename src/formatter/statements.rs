@@ -118,7 +118,11 @@ pub fn fmt_procedural_construct(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                     } else {
                         docs.push(Doc::Space);
                     }
-                    docs.push(fmt_body(f, sb, 0));
+                    // 传入原始包装节点（statement_or_null）而非解包后的节点：
+                    // fmt_body 内部依赖包装节点补 `;`（直接传 nonblocking_assignment
+                    // 会走 fmt_expr 而丢失语句末尾分号，见 examples/timer.sv 的
+                    // `enable_r <= {enable_r[0], enable};`）。
+                    docs.push(fmt_body(f, s, 0));
                 }
             }
         } else {
@@ -127,7 +131,7 @@ pub fn fmt_procedural_construct(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
             } else {
                 docs.push(Doc::Space);
             }
-            docs.push(fmt_body(f, inner, 0));
+            docs.push(fmt_body(f, b, 0));
         }
     }
     Doc::concat(docs)

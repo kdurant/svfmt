@@ -731,3 +731,83 @@ fn no_spurious_equals_on_plain_decls() {
     assert_eq!(a_col, b_col, "a 与 b 名称列对齐: {out}");
     assert_eq!(a_col, c_col, "a 与 c 名称列对齐: {out}");
 }
+
+// ---------- always/initial 单条赋值语句保留分号 ----------
+
+#[test]
+fn timing_control_body_keeps_semicolon() {
+    // 回归：always @(posedge clk) 后跟单条非阻塞赋值（RHS 为拼接）不应丢 `;`
+    // （见 examples/timer.sv 的 `enable_r <= {enable_r[0], enable};`）
+    let src =
+        "module t;\nalways @(posedge clk)\n    enable_r <= {enable_r[0], enable};\nendmodule\n";
+    let out = fmt(src, &default_cfg());
+    assert!(
+        out.contains("enable_r <= {enable_r[0], enable};"),
+        "应保留语句分号，实际输出:\n{out}"
+    );
+}
+
+#[test]
+fn always_body_assignment_keeps_semicolon() {
+    // always 后单条赋值语句（无事件控制）也应保留分号
+    let src = "module t;\nalways enable_r = 1'b0;\nendmodule\n";
+    let out = fmt(src, &default_cfg());
+    assert!(
+        out.contains("enable_r = 1'b0;"),
+        "应保留语句分号，实际输出:\n{out}"
+    );
+}
+
+// ---------- 连续实例化语句行尾注释对齐 ----------
+
+#[test]
+fn consecutive_instantiations_align_trailing_comments() {
+    // 回归：连续单行实例化语句的行尾注释应对齐到最长行 + 1 空格
+    // （见 examples/timer.sv 的 if_axi_stream 实例化组）
+    let src = "module t;\n\
+        if_axi_stream #(.DATA_WIDTH(8)) user_mux_if(); // 数据A\n\
+        if_axi_stream #(.DATA_WIDTH(8)) man_decode_if(); // 数据B\n\
+        if_axi_stream #(.DATA_WIDTH(8)) eth_up_if(); // 数据C\n\
+        endmodule\n";
+    let out = fmt(src, &default_cfg());
+    let inst_lines: Vec<&str> = out
+        .lines()
+        .filter(|l| l.contains("if_axi_stream"))
+        .collect();
+    assert_eq!(inst_lines.len(), 3, "应保留 3 行实例化: {out}");
+    let cols: Vec<usize> = inst_lines.iter().map(|l| l.find("//").unwrap()).collect();
+    assert_eq!(cols[0], cols[1], "注释应对齐到同一列: {out}");
+    assert_eq!(cols[1], cols[2], "注释应对齐到同一列: {out}");
+    // 最长行（man_decode_if）注释前仅 1 空格
+    let longest = inst_lines[1];
+    let code_len = longest.split("//").next().unwrap().trim_end().len();
+    assert_eq!(
+        longest.find("//").unwrap(),
+        code_len + 1,
+        "最长行注释应隔 1 空格: {out}"
+    );
+}
+
+#[test]
+fn multi_line_instantiation_not_aligned() {
+    // 多行参数列表实例化不进入对齐段，其内部行尾注释不被 pad_inst_comment 重排
+    // （见 examples/packet.sv 的 xpm_fifo_axis）
+    let src = "module t;\n\
+        xpm_fifo_axis #\n(\n    .CLOCKING_MODE ( \"common_clock\" ), // common_clock\n    .FIFO_DEPTH ( 16 )\n)\n\
+        xpm_fifo_axis_Ex01\n(\n    .s_aclk ( clk )\n);\n\
+        endmodule\n";
+    let out = fmt(src, &default_cfg());
+    let line = out
+        .lines()
+        .find(|l| l.contains("CLOCKING_MODE"))
+        .expect("应保留 .CLOCKING_MODE 行");
+    assert!(line.contains("// common_clock"), "注释应保留: {out}");
+    // 多行实例化内部注释不应被单行对齐规则（pad_inst_comment）处理：
+    // 注释列不应等于"代码长度 + 1"
+    let code_len = line.split("//").next().unwrap().trim_end().len();
+    assert_ne!(
+        line.find("//").unwrap(),
+        code_len + 1,
+        "多行实例化不应被单行对齐规则处理: {out}"
+    );
+}

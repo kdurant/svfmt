@@ -206,6 +206,11 @@ fn is_alignable(node: CstNode<'_>) -> bool {
         });
         return !multi;
     }
+    if node.kind() == "module_instantiation" {
+        // 仅单行实例化参与对齐（多行参数列表实例化保持原样，避免其内部
+        // 行尾注释被 pad_comment 重排，见 examples/packet.sv 的 xpm_fifo_axis）
+        return !node.text().contains('\n');
+    }
     matches!(node.kind(), "continuous_assign")
 }
 
@@ -226,6 +231,10 @@ fn decl_has_eq(f: &Formatter<'_>, node: CstNode<'_>) -> bool {
         "continuous_assign" | "local_parameter_declaration" | "parameter_declaration"
     ) {
         return true;
+    }
+    // 实例化语句的参数赋值 `#(.W(8))` 不是赋值对齐标志，不与带 `=` 的声明混组
+    if node.kind() == "module_instantiation" {
+        return false;
     }
     let _ = f;
     node.text().contains('=')
@@ -267,6 +276,10 @@ fn emit_aligned_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs: &mut Vec<D
             let (keyword, cols) = parameter_columns(f, *node);
             prefixes.push(format!("{keyword} "));
             rows.push(vec![cols[0].clone(), "=".to_string(), cols[1].clone()]);
+        } else if node.kind() == "module_instantiation" {
+            // 实例化语句：整行作为单列（不参与列对齐），仅用于行尾注释对齐
+            prefixes.push(String::new());
+            rows.push(vec![render_inline(&f.fmt(*node), f.cfg)]);
         } else {
             // 注释等：不参与对齐，空列占位
             prefixes.push(String::new());
@@ -294,6 +307,7 @@ fn emit_aligned_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs: &mut Vec<D
                     | "net_declaration"
                     | "local_parameter_declaration"
                     | "parameter_declaration"
+                    | "module_instantiation"
             )
         })
         .map(|(i, _)| {
@@ -305,6 +319,7 @@ fn emit_aligned_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs: &mut Vec<D
     // 生成完整行序列
     let mut lines: Vec<String> = Vec::new();
     let mut current: Option<String> = None;
+    let mut current_is_inst = false;
     let mut prev_end: Option<usize> = None;
     for (i, node) in seg.iter().enumerate() {
         let is_decl_or_assign = matches!(
@@ -314,6 +329,7 @@ fn emit_aligned_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs: &mut Vec<D
                 | "net_declaration"
                 | "local_parameter_declaration"
                 | "parameter_declaration"
+                | "module_instantiation"
         );
         if is_decl_or_assign {
             if let Some(l) = current.take() {
@@ -323,11 +339,13 @@ fn emit_aligned_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs: &mut Vec<D
             if !line.trim_end().ends_with(';') {
                 line.push(';');
             }
+            current_is_inst = node.kind() == "module_instantiation";
             // 声明节点内部的行尾注释
             if let Some(comment) = trailing_comment(f, *node) {
                 line = pad_comment(f, &line, &comment, 0, block_max_semi);
                 lines.push(line);
                 current = None;
+                current_is_inst = false;
             } else {
                 current = Some(line);
             }
@@ -338,7 +356,11 @@ fn emit_aligned_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs: &mut Vec<D
                 .unwrap_or("");
             if let Some(l) = current.take() {
                 if !ws.contains('\n') {
-                    lines.push(pad_comment(f, &l, node.text(), 0, block_max_semi));
+                    if current_is_inst {
+                        lines.push(pad_inst_comment(f, &l, node.text(), block_max_semi));
+                    } else {
+                        lines.push(pad_comment(f, &l, node.text(), 0, block_max_semi));
+                    }
                 } else {
                     lines.push(l);
                     lines.push(f.comment_text(*node));
@@ -346,6 +368,7 @@ fn emit_aligned_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs: &mut Vec<D
             } else {
                 lines.push(f.comment_text(*node));
             }
+            current_is_inst = false;
         }
         prev_end = Some(node.byte_range().end);
     }
@@ -413,6 +436,31 @@ fn pad_comment(
         }
     } else {
         out = pad_to(&out, target_rel, f.cfg.tab_width as usize);
+    }
+    out.push_str(comment);
+    out
+}
+
+/// 实例化行行尾注释对齐：对齐到最长行 + 1 空格（比声明/assign 的 +3 更紧凑）。
+fn pad_inst_comment(f: &Formatter<'_>, line: &str, comment: &str, block_max_semi: usize) -> String {
+    let mut out = line.trim_end().to_string();
+    if !f.cfg.align_trailing_comments {
+        // 关闭对齐：固定 comment_indent 空格
+        for _ in 0..f.cfg.comment_indent {
+            out.push(' ');
+        }
+        out.push_str(comment);
+        return out;
+    }
+    let target = block_max_semi + 1;
+    let w = display_width(&out, f.cfg.tab_width as usize);
+    if w >= target {
+        // 超长：按 comment_indent 空格分隔
+        for _ in 0..f.cfg.comment_indent {
+            out.push(' ');
+        }
+    } else {
+        out = pad_to(&out, target, f.cfg.tab_width as usize);
     }
     out.push_str(comment);
     out
