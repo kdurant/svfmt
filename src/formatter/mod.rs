@@ -246,7 +246,11 @@ impl<'a> Formatter<'a> {
             _ if node.kind().ends_with("compiler_directive")
                 || node.kind().ends_with("directive") =>
             {
-                self.raw(node)
+                if self.cfg.directives_at_line_start {
+                    Doc::concat(vec![Doc::Col0, self.raw(node)])
+                } else {
+                    self.raw(node)
+                }
             }
             _ if expressions::is_value_kind(node.kind()) => expressions::dispatch_expr(self, node),
             _ => self.fmt_default(node),

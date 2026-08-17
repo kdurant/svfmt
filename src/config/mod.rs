@@ -207,6 +207,10 @@ pub struct FormatterConfig {
     #[serde(default = "default_true")]
     pub delay_on_same_line: bool,
 
+    /// 预处理器指令（`ifdef/`else/`endif/`define 等）是否从行首开始（不缩进）。
+    #[serde(default = "default_true")]
+    pub directives_at_line_start: bool,
+
     /// 是否统一 case/casez/casex 风格。
     #[serde(default)]
     pub reformat_case: ReformatCase,
@@ -272,6 +276,7 @@ impl Default for FormatterConfig {
             end_on_newline: false,
             else_on_newline: true,
             delay_on_same_line: true,
+            directives_at_line_start: true,
             reformat_case: ReformatCase::None,
             case_indent_level: 1,
         }
@@ -317,6 +322,7 @@ mod tests {
         assert_eq!(cfg.comment_column, 40);
         assert_eq!(cfg.space_inside_instance_port_parens, 2);
         assert_eq!(cfg.interface_type_prefix, "if_");
+        assert!(cfg.directives_at_line_start, "预处理器指令应默认顶格");
     }
 
     #[test]

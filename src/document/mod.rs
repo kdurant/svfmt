@@ -31,6 +31,9 @@ pub enum Doc {
     /// 用于"单行时无空格、超宽时换行"的位置（如函数调用 `(` 之后：
     /// `$display("...")` 单行时 `(` 后无空格）。
     SoftLineNil,
+    /// 使下一个换行后的行从列 0 开始（不输出缩进）。
+    /// 用于预处理器指令（`ifdef/`else/`endif/`define 等）顶格输出。
+    Col0,
     /// 无输出。
     Nil,
 }
@@ -101,6 +104,7 @@ pub fn render(doc: &Doc, options: &RenderOptions) -> String {
         column: 0,
         out: String::new(),
         pending_newline: true,
+        suppress_indent: false,
     };
     renderer.emit(doc);
     renderer.out
@@ -113,6 +117,8 @@ struct Renderer<'a> {
     out: String,
     /// 是否位于行首（换行后尚未输出任何非空白内容）。
     pending_newline: bool,
+    /// 下一个换行后的行是否从列 0 开始（一次性抑制缩进，用于指令顶格）。
+    suppress_indent: bool,
 }
 
 impl Renderer<'_> {
@@ -171,6 +177,13 @@ impl Renderer<'_> {
             Doc::SoftLineNil => {
                 // flat 模式：不输出任何内容（单行时无空格）。
             }
+            Doc::Col0 => {
+                // 使下一行从列 0 开始（一次性抑制缩进）。
+                // 仅当位于行首时生效；若已与前面内容同行则无操作。
+                if self.pending_newline {
+                    self.suppress_indent = true;
+                }
+            }
         }
     }
 
@@ -222,7 +235,13 @@ impl Renderer<'_> {
         if !self.pending_newline {
             return;
         }
-        let width = self.indent_level * self.options.indent_width;
+        // Col0 抑制：本行从列 0 开始，不输出缩进（一次性）。
+        let width = if self.suppress_indent {
+            self.suppress_indent = false;
+            0
+        } else {
+            self.indent_level * self.options.indent_width
+        };
         if width == 0 {
             self.pending_newline = false;
             return;
@@ -278,7 +297,7 @@ struct RendererPart<'a> {
 impl RendererPart<'_> {
     fn emit(&mut self, doc: &Doc) {
         match doc {
-            Doc::Nil | Doc::Indent | Doc::Dedent | Doc::SoftLineNil => {}
+            Doc::Nil | Doc::Indent | Doc::Dedent | Doc::SoftLineNil | Doc::Col0 => {}
             Doc::Text(s) => self.column += display_width(s, self.options.tab_width),
             Doc::Space | Doc::SoftLine => self.column += 1,
             Doc::Newline | Doc::BlankLines(_) => {
@@ -389,6 +408,35 @@ mod tests {
     #[test]
     fn soft_line_renders_as_space_when_unlimited() {
         let doc = Doc::concat(vec![Doc::text("a"), Doc::SoftLine, Doc::text("b")]);
+        assert_eq!(render(&doc, &opts()), "a b");
+    }
+
+    #[test]
+    fn col0_starts_line_at_column_zero() {
+        let doc = Doc::concat(vec![
+            Doc::text("begin"),
+            Doc::Newline,
+            Doc::Indent,
+            Doc::text("a = 1;"),
+            Doc::Newline,
+            Doc::Col0,
+            Doc::text("`ifdef FOO"),
+            Doc::Newline,
+            Doc::text("b = 2;"),
+            Doc::Dedent,
+            Doc::Newline,
+            Doc::text("end"),
+        ]);
+        // Col0 使当前行从列 0 开始；后续行恢复缩进。
+        assert_eq!(
+            render(&doc, &opts()),
+            "begin\n    a = 1;\n`ifdef FOO\n    b = 2;\nend"
+        );
+    }
+
+    #[test]
+    fn col0_has_no_effect_when_not_at_line_start() {
+        let doc = Doc::concat(vec![Doc::text("a"), Doc::Space, Doc::Col0, Doc::text("b")]);
         assert_eq!(render(&doc, &opts()), "a b");
     }
 

@@ -340,8 +340,10 @@ svfmt --dump-config
 ./target/release/svfmt examples/controller.sv -o examples/controller_tmp.sv && diff examples/controller_tmp.sv examples/controller_expected.sv
 ./target/release/svfmt examples/core.sv -o examples/core_tmp.sv && diff examples/core_tmp.sv examples/core_expected.sv
 ./target/release/svfmt examples/hdmi.sv -o examples/hdmi_tmp.sv && diff examples/hdmi_tmp.sv examples/hdmi_expected.sv
+./target/release/svfmt examples/packet.sv -o examples/packet_tmp.sv && diff examples/packet_tmp.sv examples/packet_expected.sv
 ./target/release/svfmt examples/ram_sdp.sv -o examples/ram_sdp_tmp.sv && diff examples/ram_sdp_tmp.sv examples/ram_sdp_expected.sv
 ./target/release/svfmt examples/taxi.sv -o examples/taxi_tmp.sv && diff examples/taxi_tmp.sv examples/taxi_expected.sv
+./target/release/svfmt examples/timer.sv -o examples/timer_tmp.sv && diff examples/timer_tmp.sv examples/timer_expected.sv
 ./target/release/svfmt examples/test1.sv -o examples/test1_tmp.sv && diff examples/test1_tmp.sv examples/test1_expected.sv
 ./target/release/svfmt examples/test2.sv -o examples/test2_tmp.sv && diff examples/test2_tmp.sv examples/test2_expected.sv
 ./target/release/svfmt examples/test3.sv -o examples/test3_tmp.sv && diff examples/test3_tmp.sv examples/test3_expected.sv
