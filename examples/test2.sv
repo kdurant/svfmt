@@ -719,7 +719,7 @@ end
 // synthesis translate_off
 logic [195:0] cmd_STRING;
 always_comb
-begin
+begin :combination
     case(spi_flash.cmd)
         CMD_RDID : cmd_STRING = "Read ID(0x9f)";
         CMD_RDSR : cmd_STRING = "Read Status(0x05)";

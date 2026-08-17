@@ -716,7 +716,7 @@ pub fn fmt_generate(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     Doc::concat(docs)
 }
 
-fn has_colon_label(children: &[CstNode<'_>]) -> bool {
+pub fn has_colon_label(children: &[CstNode<'_>]) -> bool {
     children
         .windows(2)
         .any(|w| w[0].kind() == ":" && w[1].kind() == "simple_identifier")

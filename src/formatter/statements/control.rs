@@ -6,6 +6,8 @@ use crate::formatter::expressions::fmt_expr;
 use crate::parser::CstNode;
 
 use super::fmt_seq_block;
+use super::fmt_seq_block_with_label;
+use super::has_colon_label;
 use super::render_doc;
 use super::unwrap_statement;
 
@@ -261,7 +263,14 @@ pub(crate) fn fmt_conditional(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
 pub(crate) fn fmt_body(f: &Formatter<'_>, node: CstNode<'_>, _depth: usize) -> Doc {
     let inner = unwrap_statement(f, node);
     match inner.kind() {
-        "seq_block" => fmt_seq_block(f, inner),
+        "seq_block" => {
+            let children: Vec<_> = inner.children();
+            if has_colon_label(&children) {
+                fmt_seq_block_with_label(f, inner)
+            } else {
+                fmt_seq_block(f, inner)
+            }
+        }
         "conditional_statement" => {
             // if/else 链作为语句体时缩进一层（如 always 内无 begin/end 的 if 链）
             Doc::concat(vec![Doc::Indent, fmt_conditional(f, inner), Doc::Dedent])
