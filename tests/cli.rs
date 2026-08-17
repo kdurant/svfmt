@@ -227,3 +227,176 @@ fn cst_flag_works_with_multiple_files() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("module_declaration"), "stdout: {stdout}");
 }
+
+#[test]
+fn cli_override_column_limit() {
+    let src = "\
+module t;
+initial begin
+  $display(\"long format string %d %d\", a, b, c, d, e, f, g, h, i, j);
+end
+endmodule
+";
+    let dir = temp_dir("override");
+    let a = dir.join("a.sv");
+    std::fs::write(&a, src).unwrap();
+
+    // 默认（column_limit=0）：不断行
+    let out = Command::new(svfmt_bin()).arg(&a).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("$display(\"long format string %d %d\", a, b, c, d, e, f, g, h, i, j);"),
+        "默认应保持单行: {stdout}"
+    );
+
+    // --column-limit 40：超宽函数调用断行
+    let out = Command::new(svfmt_bin())
+        .arg("--column-limit")
+        .arg("40")
+        .arg(&a)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("$display(\n"),
+        "--column-limit 40 应断行: {stdout}"
+    );
+}
+
+#[test]
+fn cli_override_precedence_over_config_file() {
+    let src = "\
+module t;
+initial begin
+  $display(\"long format string %d %d\", a, b, c, d, e, f, g, h, i, j);
+end
+endmodule
+";
+    let dir = temp_dir("precedence");
+    let a = dir.join("a.sv");
+    let cfg = dir.join("svfmt.toml");
+    std::fs::write(&a, src).unwrap();
+    std::fs::write(&cfg, "column_limit = 40\n").unwrap();
+
+    // 配置文件 column_limit=40 → 断行
+    let out = Command::new(svfmt_bin())
+        .arg("--config")
+        .arg(&cfg)
+        .arg(&a)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("$display(\n"),
+        "配置文件 column_limit=40 应断行: {stdout}"
+    );
+
+    // CLI 覆盖 --column-limit 0 → 保持单行（CLI 优先级最高）
+    let out = Command::new(svfmt_bin())
+        .arg("--config")
+        .arg(&cfg)
+        .arg("--column-limit")
+        .arg("0")
+        .arg(&a)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("$display(\"long format string %d %d\", a, b, c, d, e, f, g, h, i, j);"),
+        "CLI --column-limit 0 应覆盖配置文件: {stdout}"
+    );
+}
+
+#[test]
+fn cli_override_bool_flags() {
+    let src = "\
+module t;
+logic a;
+initial begin
+  if (a) b <= 1;
+end
+endmodule
+";
+    let dir = temp_dir("boolflags");
+    let a = dir.join("a.sv");
+    std::fs::write(&a, src).unwrap();
+
+    // --use-tab 裸用（true）：缩进为 Tab
+    let out = Command::new(svfmt_bin())
+        .arg("--use-tab")
+        .arg(&a)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains('\t'),
+        "--use-tab 应使用 Tab 缩进: {:?}",
+        stdout
+    );
+
+    // --use-tab=false：仍为空格
+    let out = Command::new(svfmt_bin())
+        .arg("--use-tab=false")
+        .arg(&a)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !stdout.contains('\t'),
+        "--use-tab=false 不应使用 Tab: {:?}",
+        stdout
+    );
+
+    // --around-assignment=false：赋值符号两侧无空格
+    let src2 = "module t; assign y = a + b; endmodule\n";
+    std::fs::write(&a, src2).unwrap();
+    let out = Command::new(svfmt_bin())
+        .arg("--around-assignment=false")
+        .arg(&a)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("y =a + b;"),
+        "--around-assignment=false 应去掉 = 后空格: {stdout}"
+    );
+}
+
+#[test]
+fn cli_override_reformat_case() {
+    let src = "\
+module t;
+logic a;
+initial begin
+  casez(a)
+  1 : b = 1;
+  endcase
+end
+endmodule
+";
+    let dir = temp_dir("reformatcase");
+    let a = dir.join("a.sv");
+    std::fs::write(&a, src).unwrap();
+
+    // --reformat-case casex：统一为 casex
+    let out = Command::new(svfmt_bin())
+        .arg("--reformat-case")
+        .arg("casex")
+        .arg(&a)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("casex(a)"),
+        "--reformat-case casex 应统一为 casex: {stdout}"
+    );
+    assert!(
+        !stdout.contains("casez(a)"),
+        "不应残留 casez: {stdout}"
+    );
+}

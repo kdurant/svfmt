@@ -44,11 +44,7 @@ fn run_format(cli: &Cli) -> Result<(), CliError> {
     }
 
     // 加载配置（默认值或配置文件），所有文件共用同一配置
-    let cfg = if let Some(path) = &cli.config {
-        load_from_path(path)?
-    } else {
-        FormatterConfig::default()
-    };
+    let cfg = load_config(cli)?;
 
     // 逐文件处理，单个文件失败不影响其余文件
     let mut failures = Vec::new();
@@ -116,13 +112,20 @@ fn format_stdin(cli: &Cli) -> Result<(), CliError> {
         return print_cst(&source);
     }
 
-    let cfg = if let Some(path) = &cli.config {
+    let cfg = load_config(cli)?;
+
+    format_source(cli, &cfg, &source, None)
+}
+
+/// 加载配置：默认值或配置文件，再叠加命令行覆盖项（优先级最高）。
+fn load_config(cli: &Cli) -> Result<FormatterConfig, CliError> {
+    let mut cfg = if let Some(path) = &cli.config {
         load_from_path(path)?
     } else {
         FormatterConfig::default()
     };
-
-    format_source(cli, &cfg, &source, None)
+    cli.overrides.apply_to(&mut cfg);
+    Ok(cfg)
 }
 
 /// 格式化一段源码并输出。

@@ -8,8 +8,9 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 /// case 风格统一选项。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "lowercase")]
+#[value(rename_all = "lowercase")]
 #[derive(Default)]
 pub enum ReformatCase {
     /// 不修改 case 关键字。

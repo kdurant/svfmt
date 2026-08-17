@@ -91,6 +91,8 @@ Options:
   -V, --version          Print version
 ```
 
+除上述通用选项外，所有格式化配置项都可通过命令行覆盖（见下文「命令行覆盖配置」）。
+
 ### `cst` 子命令（调试）
 
 ```bash
@@ -120,7 +122,20 @@ svfmt top.sv --config svfmt.toml
 
 配置文件使用 TOML 格式（`.toml` 扩展名）。未填写的选项使用默认值。
 
-示例 `svfmt.toml`：
+### 命令行覆盖配置
+
+所有格式化配置项都可以直接作为命令行参数传入，**优先级：命令行 > 配置文件 > 默认值**。
+flag 命名与配置键一致，布尔值支持 `--flag`（true）与 `--flag=false` 两种写法：
+
+```bash
+svfmt --column-limit 80 top.sv -o out.sv        # 每行 80 列断行
+svfmt --indent-width 2 --use-tab top.sv          # 2 空格 / 改用 Tab
+svfmt --align-case-items=false top.sv            # 关闭 case 项对齐
+svfmt --reformat-case casez top.sv               # 统一为 casez
+svfmt --config svfmt.toml --column-limit 120 top.sv  # 覆盖配置文件
+```
+
+常用示例 `svfmt.toml`：
 
 ```toml
 indent_width = 4
