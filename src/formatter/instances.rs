@@ -17,6 +17,7 @@ pub fn fmt_module_instantiation(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     let mut instance: Option<CstNode<'_>> = None;
     let mut inst_name = String::new();
     let mut ports: Option<CstNode<'_>> = None;
+    let mut has_empty_parens = false;
 
     for c in &items {
         match c.kind() {
@@ -39,8 +40,16 @@ pub fn fmt_module_instantiation(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                 ports = Some(c);
             }
         }
+        // 空端口 `()`：不是端口列表。
+        // 无参数时视为类对象创建/简单实例，单行 `type inst();`
+        // （如 `eth_mii_bfm mii_bfm();`，tree-sitter 解析为 module_instantiation，
+        // 但不应展开成端口列表）；有参数时保持模块实例化处理（旧行为）。
         if ports.is_none() && has_parens {
-            ports = Some(inst);
+            if params.is_some() {
+                ports = Some(inst);
+            } else {
+                has_empty_parens = true;
+            }
         }
     }
 
@@ -108,6 +117,9 @@ pub fn fmt_module_instantiation(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
         // 无参数无端口的简单实例：单行
         docs.push(Doc::Space);
         docs.push(Doc::text(inst_name.clone()));
+        if has_empty_parens {
+            docs.push(Doc::text("()"));
+        }
         docs.push(Doc::text(";"));
         return Doc::concat(docs);
     }

@@ -4,7 +4,7 @@
 
 use crate::document::Doc;
 use crate::formatter::Formatter;
-use crate::formatter::tokens::{Token, leaf_tokens};
+use crate::formatter::tokens::{Token, has_newline, leaf_tokens};
 use crate::parser::CstNode;
 
 /// token 间隔选项。
@@ -72,6 +72,7 @@ pub fn is_value_kind(kind: &str) -> bool {
             | "system_function_call"
             | "method_call"
             | "call"
+            | "class_new"
             | "list_of_arguments"
             | "actual_argument"
             | "constant_range"
@@ -483,7 +484,8 @@ pub fn fmt_expr(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
         | "system_tf_call"
         | "tf_call"
         | "subroutine_call"
-        | "subroutine_call_statement" => fmt_call(f, node, ctx),
+        | "subroutine_call_statement"
+        | "class_new" => fmt_call(f, node, ctx),
         "assignment_expression"
         | "blocking_assignment"
         | "nonblocking_assignment"
@@ -538,12 +540,22 @@ fn fmt_children_expr(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc
             if let Some(p) = prev {
                 // 子节点前可能需要间隔（如 list_of_arguments 内的逗号）
                 if let Some(tok) = first_token_of(child) {
-                    let sep = token_sep(f, Some(&p), &tok, ctx);
-                    // 逗号后：超宽时断行（column_limit）
-                    if p.kind == "," && sep == Sep::Space {
-                        docs.push(Doc::SoftLine);
+                    let ws = f.ws(p.byte_range.1, tok.byte_range.0);
+                    // 注释相关换行：保留原文换行（多行调用/表达式中的注释
+                    // 是行导向的，折叠会破坏注释与代码的对应关系）
+                    if has_newline(ws) && (p.is_comment || child.kind().ends_with("comment")) {
+                        docs.push(Doc::Newline);
+                    } else if child.kind().ends_with("comment") {
+                        // 注释：保留原文对齐空白
+                        apply_sep(f, &mut docs, &p, &tok, Sep::Keep);
                     } else {
-                        apply_sep(f, &mut docs, &p, &tok, sep);
+                        let sep = token_sep(f, Some(&p), &tok, ctx);
+                        // 逗号后：超宽时断行（column_limit）
+                        if p.kind == "," && sep == Sep::Space {
+                            docs.push(Doc::SoftLine);
+                        } else {
+                            apply_sep(f, &mut docs, &p, &tok, sep);
+                        }
                     }
                 }
             }
@@ -551,12 +563,18 @@ fn fmt_children_expr(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc
         } else {
             let tok = to_token(f, child);
             if let Some(p) = prev {
-                let sep = token_sep(f, Some(&p), &tok, ctx);
-                // 二元运算符前：超宽时断行（column_limit）
-                if is_binary_op(tok.kind) && sep == Sep::Space {
-                    docs.push(Doc::SoftLine);
+                let ws = f.ws(p.byte_range.1, tok.byte_range.0);
+                // 注释后换行：保留（多行调用）
+                if has_newline(ws) && p.is_comment {
+                    docs.push(Doc::Newline);
                 } else {
-                    apply_sep(f, &mut docs, &p, &tok, sep);
+                    let sep = token_sep(f, Some(&p), &tok, ctx);
+                    // 二元运算符前：超宽时断行（column_limit）
+                    if is_binary_op(tok.kind) && sep == Sep::Space {
+                        docs.push(Doc::SoftLine);
+                    } else {
+                        apply_sep(f, &mut docs, &p, &tok, sep);
+                    }
                 }
             }
             docs.push(Doc::text(tok.text));
@@ -796,15 +814,34 @@ fn fmt_call(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
     let mut prev: Option<Token> = None;
     for child in node.children_iter() {
         if child.is_named() {
-            docs.push(fmt_expr(f, child, ctx));
+            let d = fmt_expr(f, child, ctx);
+            if let Some(p) = prev {
+                if let Some(tok) = first_token_of(child) {
+                    let ws = f.ws(p.byte_range.1, tok.byte_range.0);
+                    // 注释后或 `(` 后换行：保留（多行调用）
+                    if has_newline(ws) && (p.is_comment || p.kind == "(") {
+                        docs.push(Doc::Newline);
+                    } else {
+                        let sep = token_sep(f, Some(&p), &tok, ctx);
+                        apply_sep(f, &mut docs, &p, &tok, sep);
+                    }
+                }
+            }
+            docs.push(d);
             if let Some(t) = last_token_of(child) {
                 prev = Some(t);
             }
         } else {
             let tok = to_token(f, child);
             if let Some(p) = prev {
-                let sep = token_sep(f, Some(&p), &tok, ctx);
-                apply_sep(f, &mut docs, &p, &tok, sep);
+                let ws = f.ws(p.byte_range.1, tok.byte_range.0);
+                // 注释后换行：保留（多行调用）
+                if has_newline(ws) && p.is_comment {
+                    docs.push(Doc::Newline);
+                } else {
+                    let sep = token_sep(f, Some(&p), &tok, ctx);
+                    apply_sep(f, &mut docs, &p, &tok, sep);
+                }
             }
             docs.push(Doc::text(tok.text));
             // 左括号后：单行时无空格（`$display("...")`），超宽时参数整体
@@ -813,6 +850,14 @@ fn fmt_call(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
                 docs.push(Doc::Indent);
                 docs.push(Doc::SoftLineNil);
             } else if tok.kind == ")" {
+                // 多行调用：`)` 前保留换行（在 +1 缩进层）
+                if let Some(p) = prev {
+                    let ws = f.ws(p.byte_range.1, tok.byte_range.0);
+                    if has_newline(ws) {
+                        docs.push(Doc::Newline);
+                    }
+                }
+                docs.push(Doc::text(")"));
                 docs.push(Doc::Dedent);
             }
             prev = Some(tok);
