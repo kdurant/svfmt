@@ -178,15 +178,6 @@ pub struct FormatterConfig {
     #[serde(default)]
     pub module: ModuleConfig,
 
-    /// 接口实例化是否压缩为一行。
-    #[serde(default = "default_true")]
-    pub one_line_interface_instantiation: bool,
-    /// 接口类型名前缀。
-    #[serde(default = "default_if_prefix")]
-    pub interface_type_prefix: String,
-    /// 接口类型名后缀。
-    #[serde(default = "default_if_suffix")]
-    pub interface_type_suffix: String,
     /// 实例化端口超过多少个时强制换行（0 不强制）。
     #[serde(default = "default_one")]
     pub wrap_instance_ports: u32,
@@ -240,12 +231,6 @@ fn default_true() -> bool {
 fn default_false() -> bool {
     false
 }
-fn default_if_prefix() -> String {
-    "if_".into()
-}
-fn default_if_suffix() -> String {
-    "_if".into()
-}
 
 impl Default for FormatterConfig {
     fn default() -> Self {
@@ -267,9 +252,6 @@ impl Default for FormatterConfig {
             space_inside_instance_port_parens: 2,
             align_case_items: true,
             module: ModuleConfig::default(),
-            one_line_interface_instantiation: true,
-            interface_type_prefix: "if_".into(),
-            interface_type_suffix: "_if".into(),
             wrap_instance_ports: 1,
             begin_end_on_newline: true,
             end_of_line_for_begin: false,
@@ -321,7 +303,6 @@ mod tests {
         assert!(cfg.module.port_alignment);
         assert_eq!(cfg.comment_column, 40);
         assert_eq!(cfg.space_inside_instance_port_parens, 2);
-        assert_eq!(cfg.interface_type_prefix, "if_");
         assert!(cfg.directives_at_line_start, "预处理器指令应默认顶格");
     }
 

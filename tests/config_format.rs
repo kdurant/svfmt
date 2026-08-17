@@ -539,17 +539,6 @@ fn end_on_newline() {
 // ---------- 实例 ----------
 
 #[test]
-fn one_line_interface_instantiation() {
-    let src = "module t;\nif_axi_stream #(.DATA_WIDTH(8)) fifo_if();\nendmodule\n";
-    let (out_true, out_false) = assert_changes(src, |c| c.one_line_interface_instantiation = false);
-    assert!(
-        out_true.contains("fifo_if();") && !out_true.contains("fifo_if\n"),
-        "接口实例化单行: {out_true}"
-    );
-    assert!(out_false.contains("fifo_if\n("), "关闭单行化: {out_false}");
-}
-
-#[test]
 fn instance_port_list_break_before_open_paren() {
     let src = "module t;\nu_foo u ( .a(a) );\nendmodule\n";
     let (out_true, out_false) = assert_changes(src, |c| {
@@ -614,48 +603,6 @@ fn align_instance_ports() {
         "关闭时无括号内空格: {out_false}"
     );
     assert_ne!(out_true, out_false, "align_instance_ports 开关应改变输出");
-}
-
-#[test]
-fn interface_type_prefix() {
-    // 默认前缀 "if_"：if_ 开头 → 接口，压缩一行
-    let if_src = "module t;\nif_axi_stream #(.DATA_WIDTH(8)) fifo_if();\nendmodule\n";
-    let out_if = fmt(if_src, &default_cfg());
-    assert!(
-        out_if.contains("fifo_if();") && !out_if.contains("fifo_if\n"),
-        "if_ 开头按接口压缩一行: {out_if}"
-    );
-    // 非 if_ 开头 → 模块实例化，不压缩
-    let mod_src = "module t;\nmy_stream #(.DATA_WIDTH(8)) s();\nendmodule\n";
-    let out_mod = fmt(mod_src, &default_cfg());
-    assert!(
-        !out_mod.contains("s();"),
-        "默认前缀不匹配 my_stream: {out_mod}"
-    );
-    // 自定义前缀 my_ 后，my_stream 被识别为接口
-    let mut cfg = default_cfg();
-    cfg.interface_type_prefix = "my_".into();
-    let out_my = fmt(mod_src, &cfg);
-    assert!(
-        out_my.contains("s();") && !out_my.contains("s\n"),
-        "自定义前缀应识别 my_stream: {out_my}"
-    );
-}
-
-#[test]
-fn interface_type_suffix() {
-    // 默认后缀 "_if"：以 _if 结尾 → 接口，压缩一行
-    let src = "module t;\naxi_stream_if #(.DATA_WIDTH(8)) s();\nendmodule\n";
-    let out = fmt(src, &default_cfg());
-    assert!(
-        out.contains("s();") && !out.contains("s\n"),
-        "_if 结尾按接口压缩一行: {out}"
-    );
-    // 改后缀为不匹配的值 → 不再识别为接口
-    let mut cfg = default_cfg();
-    cfg.interface_type_suffix = "zz_".into();
-    let out2 = fmt(src, &cfg);
-    assert!(!out2.contains("s();"), "后缀不匹配时不应压缩: {out2}");
 }
 
 #[test]

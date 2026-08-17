@@ -857,7 +857,7 @@ fn fmt_call(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
                         docs.push(Doc::Newline);
                     }
                 }
-                docs.push(Doc::text(")"));
+                // `)` 已由上方 `docs.push(Doc::text(tok.text))` 输出，此处仅缩进回退。
                 docs.push(Doc::Dedent);
             }
             prev = Some(tok);

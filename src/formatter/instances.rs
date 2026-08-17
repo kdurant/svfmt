@@ -41,21 +41,16 @@ pub fn fmt_module_instantiation(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
             }
         }
         // 空端口 `()`：不是端口列表。
-        // 无参数时视为类对象创建/简单实例，单行 `type inst();`
-        // （如 `eth_mii_bfm mii_bfm();`，tree-sitter 解析为 module_instantiation，
-        // 但不应展开成端口列表）；有参数时保持模块实例化处理（旧行为）。
+        // 无论是否有参数，只要无端口连接就标记为 has_empty_parens，压缩为一行。
         if ports.is_none() && has_parens {
-            if params.is_some() {
-                ports = Some(inst);
-            } else {
-                has_empty_parens = true;
-            }
+            has_empty_parens = true;
         }
     }
 
-    // 接口实例化：压缩为一行
-    if is_interface_type(f, &type_name) {
-        return fmt_interface_one_line(f, node, &type_name, params, &inst_name, ports, has_empty_parens);
+    // 无端口实例化（`type inst();`）：压缩为一行
+    // tree-sitter 不区分模块与接口，故统一按"无端口"判断。
+    if has_empty_parens {
+        return fmt_empty_port_one_line(f, node, &type_name, params, &inst_name);
     }
 
     let mut docs: Vec<Doc> = Vec::new();
@@ -114,12 +109,9 @@ pub fn fmt_module_instantiation(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
         docs.push(Doc::text(")"));
     }
     if params.is_none() && ports.is_none() {
-        // 无参数无端口的简单实例：单行
+        // 无参数无端口且无括号的简单实例：单行（极少触发，正常实例化均有括号）
         docs.push(Doc::Space);
         docs.push(Doc::text(inst_name.clone()));
-        if has_empty_parens {
-            docs.push(Doc::text("()"));
-        }
         docs.push(Doc::text(";"));
         return Doc::concat(docs);
     }
@@ -152,26 +144,13 @@ pub fn fmt_module_instantiation(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     Doc::concat(docs)
 }
 
-/// 判断类型名是否为接口（前缀/后缀命中）。
-fn is_interface_type(f: &Formatter<'_>, type_name: &str) -> bool {
-    if !f.cfg.one_line_interface_instantiation {
-        return false;
-    }
-    let prefix = &f.cfg.interface_type_prefix;
-    let suffix = &f.cfg.interface_type_suffix;
-    (!prefix.is_empty() && type_name.starts_with(prefix.as_str()))
-        || (!suffix.is_empty() && type_name.ends_with(suffix.as_str()))
-}
-
-/// 接口实例化单行输出。
-fn fmt_interface_one_line(
+/// 无端口实例化单行输出：`type #(...) inst();` 或 `type inst();`。
+fn fmt_empty_port_one_line(
     f: &Formatter<'_>,
     _node: CstNode<'_>,
     type_name: &str,
     params: Option<CstNode<'_>>,
     inst_name: &str,
-    ports: Option<CstNode<'_>>,
-    has_empty_parens: bool,
 ) -> Doc {
     let mut docs: Vec<Doc> = Vec::new();
     docs.push(Doc::text(type_name.to_string()));
@@ -184,18 +163,7 @@ fn fmt_interface_one_line(
     }
     docs.push(Doc::Space);
     docs.push(Doc::text(inst_name.to_string()));
-    if let Some(pl) = ports {
-        if pl.kind() == "list_of_port_connections" {
-            docs.push(Doc::text("("));
-            docs.push(fmt_inline_connections(f, pl));
-            docs.push(Doc::text(")"));
-        } else {
-            // 空端口 `()`
-            docs.push(Doc::text("()"));
-        }
-    } else if has_empty_parens {
-        docs.push(Doc::text("()"));
-    }
+    docs.push(Doc::text("()"));
     docs.push(Doc::text(";"));
     Doc::concat(docs)
 }

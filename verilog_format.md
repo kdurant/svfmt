@@ -671,47 +671,6 @@ u_foo u_foo (
 
 # 端口与实例
 
-
-## one_line_interface_instantiation
-接口实例化是否压缩为一行
-
-- 默认： true
-
-#### true
-```verilog
-if_axi_stream #(.DATA_WIDTH(8)) fifo_if();
-```
-
-#### false
-```verilog
-if_axi_stream #
-(
-    .DATA_WIDTH(8)
-) fifo_if();
-```
-
-## interface_type_prefix
-接口类型名前缀。当 `one_line_interface_instantiation` 为 true 时，实例化的类型名以该前缀开头即按接口实例化处理，压缩为一行。tree-sitter 的 CST 无法区分接口实例化与模块实例化（语法完全相同），因此只能靠命名约定识别。
-
-- 默认： `if_`
-- 设为空字符串 `""` 可禁用前缀匹配
-
-### 默认 `if_`
-```verilog
-if_axi_stream #(.DATA_WIDTH(8)) fifo_if();
-```
-
-## interface_type_suffix
-接口类型名后缀。类型名以该后缀结尾即按接口实例化处理，与 `interface_type_prefix` 互补（满足其一即可）。
-
-- 默认： `_if`
-- 设为空字符串 `""` 可禁用后缀匹配
-
-### 默认 `_if`
-```verilog
-axi_stream_if #(.DATA_WIDTH(8)) fifo_if();
-```
-
 ## wrap_instance_ports
 实例化端口超过多少个时强制换行
 
