@@ -36,7 +36,7 @@ begin
     case (mode)
     4'b0000:
     begin
-        if(cnt < PERIOD_TIME_CNT)
+        if(cnt < bsp::PERIOD_TIME_CNT)
             cnt <= cnt + 1'b1;
         else
             cnt <= 0;

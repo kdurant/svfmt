@@ -167,7 +167,6 @@ pub fn is_binary_op(kind: &str) -> bool {
             | "<<<"
             | ">>>"
             | "**"
-            | "::"
     )
 }
 
@@ -212,6 +211,10 @@ pub fn token_sep(f: &Formatter<'_>, prev: Option<&Token>, cur: &Token, ctx: &Exp
         }
         // 点
         if prev.kind == "." || cur.kind == "." {
+            return Sep::None;
+        }
+        // 作用域解析 `::`：无空格（`bsp::DEVICE_MAC`）
+        if prev.kind == "::" || cur.kind == "::" {
             return Sep::None;
         }
         // 括号
@@ -913,6 +916,20 @@ mod tests {
         assert_eq!(
             fmt_expr_src("module t; assign y = -a; endmodule\n"),
             "module t;\nassign y = -a;\nendmodule\n"
+        );
+    }
+
+    #[test]
+    fn scope_resolution_has_no_spaces() {
+        // `::` 是作用域解析符，两侧不加空格（`bsp::DEVICE_MAC`）
+        assert_eq!(
+            fmt_expr_src("module t; assign y = bsp::DEVICE_MAC; endmodule\n"),
+            "module t;\nassign y = bsp::DEVICE_MAC;\nendmodule\n"
+        );
+        // 条件表达式中的 `::` 同样无空格
+        assert_eq!(
+            fmt_expr_src("module t; if (cnt < bsp::PERIOD_TIME_CNT) cnt = 0; endmodule\n"),
+            "module t;\nif(cnt < bsp::PERIOD_TIME_CNT) cnt = 0;\nendmodule\n"
         );
     }
 }
