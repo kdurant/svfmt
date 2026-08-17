@@ -13,9 +13,9 @@ use clap::{ArgAction, Args, Parser, Subcommand};
     propagate_version = true
 )]
 pub struct Cli {
-    /// 输入 .sv 文件路径；省略或为 `-` 时从标准输入读取
+    /// 输入 .sv 文件路径（可多个，支持 glob）；省略或为 `-` 时从标准输入读取
     #[arg(value_name = "FILE")]
-    pub file: Option<PathBuf>,
+    pub files: Vec<PathBuf>,
 
     /// 输出文件路径（默认输出到 stdout）
     #[arg(short = 'o', long, value_name = "OUT")]

@@ -3,7 +3,7 @@
 pub mod args;
 
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use clap::Parser;
 
@@ -30,34 +30,112 @@ pub fn run() -> Result<(), CliError> {
 
 /// 默认格式化流程。
 fn run_format(cli: &Cli) -> Result<(), CliError> {
-    // 支持文件路径或 stdin（无参数 / `-`）
-    let source = match &cli.file {
-        Some(f) if f.to_string_lossy() != "-" => read_source(f)?,
-        _ => read_stdin()?,
-    };
+    // 展开输入文件（支持 glob）
+    let files = expand_inputs(&cli.files)?;
 
-    if cli.cst {
-        let options = PrintOptions::default();
-        let mut parser = SvParser::new()?;
-        let tree = parser.parse(&source)?;
-        let rendered = print_cst_to_string(tree.root_node(), &options);
-        let stdout = io::stdout();
-        let mut out = stdout.lock();
-        out.write_all(rendered.as_bytes())?;
-        out.flush()?;
-        return Ok(());
+    // 无输入 → 从 stdin 读取
+    if files.is_empty() {
+        return format_stdin(cli);
     }
 
-    // 加载配置（默认值或配置文件）
+    // `-o` 只允许配合单个输入文件
+    if cli.output.is_some() && files.len() > 1 {
+        return Err(CliError::OutputWithMultipleFiles);
+    }
+
+    // 加载配置（默认值或配置文件），所有文件共用同一配置
     let cfg = if let Some(path) = &cli.config {
         load_from_path(path)?
     } else {
         FormatterConfig::default()
     };
 
-    let (formatted, error_count) = Formatter::format_source_checked(&source, &cfg)?;
+    // 逐文件处理，单个文件失败不影响其余文件
+    let mut failures = Vec::new();
+    for file in &files {
+        if let Err(e) = format_file(cli, &cfg, file) {
+            failures.push(format!("{}: {e}", file.display()));
+        }
+    }
+
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(CliError::BatchFailed(failures))
+    }
+}
+
+/// 展开输入参数：支持 glob 模式（`*`、`?`、`[...]`）。
+fn expand_inputs(inputs: &[PathBuf]) -> Result<Vec<PathBuf>, CliError> {
+    let mut out = Vec::new();
+    for input in inputs {
+        let s = input.to_string_lossy();
+        // `-` 表示 stdin，仅在无其他输入时生效（这里直接跳过）
+        if s == "-" {
+            continue;
+        }
+        if has_glob_meta(&s) {
+            let paths = glob::glob(&s).map_err(|e| CliError::Glob(s.to_string(), e))?;
+            let mut matched = Vec::new();
+            for entry in paths {
+                let p = entry.map_err(|e| CliError::GlobEntry(s.to_string(), e.into()))?;
+                matched.push(p);
+            }
+            if matched.is_empty() {
+                return Err(CliError::GlobNoMatch(s.to_string()));
+            }
+            matched.sort();
+            out.extend(matched);
+        } else {
+            out.push(input.clone());
+        }
+    }
+    Ok(out)
+}
+
+fn has_glob_meta(s: &str) -> bool {
+    s.contains('*') || s.contains('?') || s.contains('[')
+}
+
+/// 格式化单个文件（或打印其 CST）。
+fn format_file(cli: &Cli, cfg: &FormatterConfig, file: &Path) -> Result<(), CliError> {
+    let source = read_source(file)?;
+
+    if cli.cst {
+        return print_cst(&source);
+    }
+
+    format_source(cli, cfg, &source, Some(file))
+}
+
+/// 从 stdin 读取并格式化（或打印 CST）。
+fn format_stdin(cli: &Cli) -> Result<(), CliError> {
+    let source = read_stdin()?;
+
+    if cli.cst {
+        return print_cst(&source);
+    }
+
+    let cfg = if let Some(path) = &cli.config {
+        load_from_path(path)?
+    } else {
+        FormatterConfig::default()
+    };
+
+    format_source(cli, &cfg, &source, None)
+}
+
+/// 格式化一段源码并输出。
+fn format_source(
+    cli: &Cli,
+    cfg: &FormatterConfig,
+    source: &str,
+    file: Option<&Path>,
+) -> Result<(), CliError> {
+    let (formatted, error_count) = Formatter::format_source_checked(source, cfg)?;
     if error_count > 0 {
-        let msg = format!("警告: 解析到 {error_count} 个语法错误节点，输出可能不完整");
+        let where_ = file.map_or(String::new(), |f| format!("{}: ", f.display()));
+        let msg = format!("警告: {where_}解析到 {error_count} 个语法错误节点，输出可能不完整");
         if cli.fail_on_parse_error {
             return Err(CliError::SyntaxErrors(error_count));
         }
@@ -66,13 +144,8 @@ fn run_format(cli: &Cli) -> Result<(), CliError> {
 
     // 输出
     if cli.in_place {
-        let file = cli
-            .file
-            .as_ref()
-            .filter(|f| f.to_string_lossy() != "-")
-            .ok_or(CliError::MissingInput)?;
-        std::fs::write(file, &formatted)
-            .map_err(|e| CliError::Write(file.display().to_string(), e))?;
+        let f = file.ok_or(CliError::MissingInput)?;
+        std::fs::write(f, &formatted).map_err(|e| CliError::Write(f.display().to_string(), e))?;
     } else if let Some(out) = &cli.output {
         std::fs::write(out, &formatted)
             .map_err(|e| CliError::Write(out.display().to_string(), e))?;
@@ -82,6 +155,19 @@ fn run_format(cli: &Cli) -> Result<(), CliError> {
         out.write_all(formatted.as_bytes())?;
         out.flush()?;
     }
+    Ok(())
+}
+
+/// 打印源码的 CST（调试用）。
+fn print_cst(source: &str) -> Result<(), CliError> {
+    let options = PrintOptions::default();
+    let mut parser = SvParser::new()?;
+    let tree = parser.parse(source)?;
+    let rendered = print_cst_to_string(tree.root_node(), &options);
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
+    out.write_all(rendered.as_bytes())?;
+    out.flush()?;
     Ok(())
 }
 
@@ -141,6 +227,16 @@ pub enum CliError {
     NotUtf8(String),
     #[error("源码存在语法错误（{0} 个 ERROR 节点），已按要求以失败退出")]
     SyntaxErrors(usize),
+    #[error("输出选项 -o 与多个输入文件冲突：-o 只能配合单个输入文件")]
+    OutputWithMultipleFiles,
+    #[error("glob 模式 {0} 无效: {1}")]
+    Glob(String, glob::PatternError),
+    #[error("glob 匹配 {0} 时出错: {1}")]
+    GlobEntry(String, io::Error),
+    #[error("glob 模式 {0} 没有匹配到任何文件")]
+    GlobNoMatch(String),
+    #[error("以下文件处理失败:\n{}", .0.join("\n"))]
+    BatchFailed(Vec<String>),
     #[error(transparent)]
     Parse(#[from] crate::parser::SvParserError),
     #[error(transparent)]

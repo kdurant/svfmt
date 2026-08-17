@@ -25,6 +25,7 @@ Formatted SystemVerilog
 - **高度可配置**：缩进、空格、空行、注释、对齐、模块/端口/实例布局等 40+ 项选项
 - **配置文件**：支持 TOML
 - **管道友好**：支持 stdin/stdout、`-o` 输出文件、`--in-place` 就地覆盖
+- **批量格式化**：支持多个输入文件与 glob 模式（如 `svfmt --in-place *.sv`）
 - **调试支持**：内置 CST 打印（`--cst` / `cst` 子命令）
 
 ## 安装
@@ -57,20 +58,28 @@ svfmt top.sv -o top_formatted.sv
 # 就地覆盖源文件
 svfmt top.sv --in-place
 
+# 批量就地格式化多个文件（shell 展开 glob）
+svfmt --in-place *.sv
+
+# 程序内 glob 展开（引号包裹时同样生效）
+svfmt --in-place 'rtl/**/*.sv'
+
 # 从 stdin 读取，结果写到 stdout（省略 FILE 或传 `-`）
 cat top.sv | svfmt - > formatted.sv
 ```
 
+> 批量模式下：`-o` 只能配合单个输入文件；单个文件失败（如不存在）不影响其余文件，但进程以非零状态退出。
+
 ## 命令行选项
 
 ```
-Usage: svfmt [OPTIONS] [FILE] [COMMAND]
+Usage: svfmt [OPTIONS] [FILE]... [COMMAND]
 
 Commands:
   cst   解析 SystemVerilog 文件并递归打印 CST
 
 Arguments:
-  [FILE]  输入 .sv 文件路径；省略或为 `-` 时从标准输入读取
+  [FILE]...  输入 .sv 文件路径（可多个，支持 glob）；省略或为 `-` 时从标准输入读取
 
 Options:
   -o, --output <OUT>     输出文件路径（默认输出到 stdout）

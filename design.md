@@ -266,12 +266,19 @@ svfmt --config config.toml file.sv
 svfmt -o file_after_format.sv file.sv
 
 svfmt --in-place file.sv
+svfmt --in-place *.sv            # 批量就地格式化（支持 glob）
+svfmt --in-place 'rtl/**/*.sv'   # 程序内 glob 展开
 svfmt --version
 svfmt -o file_afte_format.sv file.sv
 
 # 将选项默认值生成配置文件
 svfmt --dump-config
 ```
+
+CLI 约定：
+- 输入文件可多个，支持 glob 模式（`*`、`?`、`[...]`）；省略或为 `-` 时从 stdin 读取。
+- `-o` 只能配合单个输入文件，与多文件同时使用时报错。
+- 批量模式下单个文件失败不影响其余文件，但进程以非零状态退出并汇总失败列表。
 
 # 二十一、重要设计原则
 
