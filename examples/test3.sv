@@ -73,4 +73,12 @@ ila_128x4096 ila_128x4096Ex01
                     axis_gps_tvalid, axis_gps_tready, axis_gps_tlast, axis_process_if.tdata, axis_process_if.tvalid, axis_process_if.tready, axis_process_if.tlast
     })
 );
+
+generate
+    if(!DVI_OUTPUT)
+    begin : true_hdmi_output
+        mode <= 3'd0;
+    end
+endgenerate
+
 endmodule

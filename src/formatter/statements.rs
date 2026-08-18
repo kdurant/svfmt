@@ -732,8 +732,7 @@ fn fmt_generate_block(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
         if seg.is_empty() {
             return;
         }
-        if !docs.is_empty()
-            && !matches!(docs.last(), Some(Doc::Newline) | Some(Doc::BlankLines(_)))
+        if !docs.is_empty() && !matches!(docs.last(), Some(Doc::Newline) | Some(Doc::BlankLines(_)))
         {
             docs.push(Doc::Newline);
         }
@@ -779,6 +778,8 @@ fn fmt_generate_block(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                 docs.push(Doc::BlankLines(blanks));
             } else if has_nl {
                 docs.push(Doc::Newline);
+            } else if child.kind() == ";" {
+                // 裸分号（如 ERROR 表达式后）：紧跟前一个 token，不加空格
             } else {
                 docs.push(Doc::Space);
             }
@@ -794,6 +795,76 @@ fn fmt_generate_block(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
         first = false;
     }
     flush(f, &mut seg, &mut docs);
+    Doc::concat(docs)
+}
+
+/// if_generate_construct：`if (cond) begin...end [else begin...end]`。
+pub fn fmt_if_generate_construct(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
+    let mut docs: Vec<Doc> = Vec::new();
+    let items: Vec<CstNode<'_>> = node.children();
+    let mut body: Option<CstNode<'_>> = None;
+    let mut after_body = 0usize;
+
+    let mut i = 0usize;
+    while i < items.len() {
+        let c = items[i];
+        match c.kind() {
+            "if" => {
+                docs.push(Doc::text("if"));
+                if f.cfg.space.before_control_statement_parens {
+                    docs.push(Doc::Space);
+                }
+            }
+            "(" => docs.push(Doc::text("(")),
+            ")" => docs.push(Doc::text(")")),
+            "constant_expression" | "expression" | "unary_expression" | "primary" => {
+                docs.push(fmt_expr(
+                    f,
+                    c,
+                    &crate::formatter::expressions::ExprCtx::default(),
+                ));
+            }
+            "generate_block" => {
+                body = Some(c);
+                after_body = i + 1;
+                break;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    if let Some(b) = body {
+        docs.push(Doc::Newline);
+        docs.push(fmt_generate_block(f, b));
+        // else 子句：`else [comment] begin...end`
+        let mut j = after_body;
+        while j < items.len() {
+            let c = items[j];
+            if c.kind() == "else" {
+                docs.push(Doc::Newline);
+                docs.push(Doc::text("else"));
+                // else 后的行内注释
+                if let Some(next) = items.get(j + 1)
+                    && next.is_named()
+                    && next.kind().ends_with("comment")
+                    && !f.ws(c.byte_range().end, next.byte_range().start).contains('\n')
+                {
+                    docs.push(Doc::Space);
+                    docs.push(Doc::text(next.text()));
+                    j += 1;
+                }
+                if let Some(gb) = items.get(j + 1)
+                    && gb.kind() == "generate_block"
+                {
+                    docs.push(Doc::Newline);
+                    docs.push(fmt_generate_block(f, *gb));
+                }
+                break;
+            }
+            j += 1;
+        }
+    }
     Doc::concat(docs)
 }
 

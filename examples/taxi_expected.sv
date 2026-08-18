@@ -78,11 +78,14 @@ module taxi_axis_gmii_rx #
 localparam USER_W = (PTP_TS_EN ? PTP_TS_W : 0) + 1;
 
 // check configuration
-if(DATA_W != 8)    $fatal(0, "Error: Interface width must be 8 (instance %m)");
+if(DATA_W != 8)
+    $fatal(0, "Error: Interface width must be 8 (instance %m)");
 
-if(m_axis_rx.DATA_W != DATA_W)    $fatal(0, "Error: Interface DATA_W parameter mismatch (instance %m)");
+if(m_axis_rx.DATA_W != DATA_W)
+    $fatal(0, "Error: Interface DATA_W parameter mismatch (instance %m)");
 
-if(m_axis_rx.USER_W != USER_W)    $fatal(0, "Error: Interface USER_W parameter mismatch (instance %m)");
+if(m_axis_rx.USER_W != USER_W)
+    $fatal(0, "Error: Interface USER_W parameter mismatch (instance %m)");
 
 typedef enum logic [7:0] {
     ETH_PRE = 8'h55,
@@ -170,7 +173,10 @@ assign m_axis_rx.tlast    = m_axis_rx_tlast_reg;
 assign m_axis_rx.tid      = '0;
 assign m_axis_rx.tdest    = '0;
 assign m_axis_rx.tuser[0] = m_axis_rx_tuser_reg;
-if(PTP_TS_EN) begin    assign m_axis_rx.tuser[1+:PTP_TS_W] = ptp_ts_out_reg; end
+if(PTP_TS_EN)
+begin
+    assign m_axis_rx.tuser[1 +: PTP_TS_W] = ptp_ts_out_reg;
+end
 
 assign rx_start_packet = start_packet_reg;
 

@@ -217,10 +217,14 @@ impl<'a> Formatter<'a> {
             "loop_generate_construct" => statements::fmt_loop_statement(self, node),
             "conditional_generate_construct" => {
                 if let Some(child) = node.named_child(0) {
-                    if child.kind() == "case_generate_construct" {
-                        statements::fmt_case_generate_construct(self, child)
-                    } else {
-                        statements::fmt_loop_statement(self, node)
+                    match child.kind() {
+                        "case_generate_construct" => {
+                            statements::fmt_case_generate_construct(self, child)
+                        }
+                        "if_generate_construct" => {
+                            statements::fmt_if_generate_construct(self, child)
+                        }
+                        _ => statements::fmt_loop_statement(self, node),
                     }
                 } else {
                     statements::fmt_loop_statement(self, node)

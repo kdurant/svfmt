@@ -242,7 +242,141 @@ logic [5:0]  control_data     = 6'd0;
 logic [11:0] data_island_data = 12'd0;
 
 generate
-    if(!DVI_OUTPUT)    begin : true_hdmi_output        logic video_guard = 1; logic video_preamble = 0; always_ff @(posedge clk_pixel)        begin            if(reset)            begin                video_guard <= 1; video_preamble <= 0; end            else            begin                video_guard <= cx >= frame_width - 2 && cx < frame_width && (cy == frame_height - 1 || cy < screen_height - 1 /* no VG at end of last line */); video_preamble <= cx >= frame_width - 10 && cx < frame_width - 2 && (cy == frame_height - 1 || cy < screen_height - 1 /* no VP at end of last line */); end        end        // See Section 5.2.3.1        int max_num_packets_alongside; logic[4 : 0] num_packets_alongside; always_comb        begin            max_num_packets_alongside = (frame_width - screen_width  /* VD period */ - 2 /* V guard */ - 8 /* V preamble */ - 4 /* Min V control period */ - 2 /* DI trailing guard */ - 2 /* DI leading guard */ - 8 /* DI premable */ - 4 /* Min DI control period */) / 32; if(max_num_packets_alongside > 18)                num_packets_alongside = 5'd18; else                num_packets_alongside = 5'(max_num_packets_alongside); end        logic data_island_period_instantaneous; assign data_island_period_instantaneous = num_packets_alongside > 0 && cx >= screen_width + 14 && cx < screen_width + 14 + num_packets_alongside * 32; logic packet_enable; assign packet_enable = data_island_period_instantaneous && 5'(cx + screen_width + 18) == 5'd0; logic data_island_guard = 0; logic data_island_preamble = 0; logic data_island_period = 0; always_ff @(posedge clk_pixel)        begin            if(reset)            begin                data_island_guard <= 0; data_island_preamble <= 0; data_island_period <= 0; end            else            begin                data_island_guard <= num_packets_alongside > 0 && ((cx >= screen_width + 12 && cx < screen_width + 14) /* leading guard */ || (cx >= screen_width + 14 + num_packets_alongside * 32 && cx < screen_width + 14 + num_packets_alongside * 32 + 2) /* trailing guard */); data_island_preamble <= num_packets_alongside > 0 && cx >= screen_width + 4 && cx < screen_width + 12; data_island_period <= data_island_period_instantaneous; end        end        // See Section 5.2.3.4        logic[23 : 0] header; logic[55 : 0] sub[3 : 0]; logic video_field_end; assign video_field_end = cx == screen_width - 1'b1 && cy == screen_height - 1'b1; logic[4 : 0] packet_pixel_counter; packet_picker#(.VIDEO_ID_CODE(VIDEO_ID_CODE),.VIDEO_RATE(VIDEO_RATE),.IT_CONTENT(IT_CONTENT),.AUDIO_RATE(AUDIO_RATE),.AUDIO_BIT_WIDTH(AUDIO_BIT_WIDTH),.VENDOR_NAME(VENDOR_NAME),.PRODUCT_DESCRIPTION(PRODUCT_DESCRIPTION),.SOURCE_DEVICE_INFORMATION(SOURCE_DEVICE_INFORMATION)) packet_picker(.clk_pixel(clk_pixel),.clk_audio(clk_audio),.reset(reset),.video_field_end(video_field_end),.packet_enable(packet_enable),.packet_pixel_counter(packet_pixel_counter),.audio_sample_word(audio_sample_word),.header(header),.sub(sub)); logic[8 : 0] packet_data; packet_assembler packet_assembler(.clk_pixel(clk_pixel),.reset(reset),.data_island_period(data_island_period),.header(header),.sub(sub),.packet_data(packet_data),.counter(packet_pixel_counter)); always_ff @(posedge clk_pixel)        begin            if(reset)            begin                mode <= 3'd2; video_data <= 24'd0; control_data = 6'd0; data_island_data <= 12'd0; end            else            begin                mode <= data_island_guard ? 3'd4 : data_island_period ? 3'd3 : video_guard ? 3'd2 : video_data_period ? 3'd1 : 3'd0; video_data <= rgb; control_data <= {{1'b0, data_island_preamble}, {1'b0, video_preamble || data_island_preamble}, {vsync, hsync}}; // ctrl3, ctrl2, ctrl1, ctrl0, vsync, hsync                data_island_data[11 : 4] <= packet_data[8 : 1]; data_island_data[3] <= cx != 0; data_island_data[2] <= packet_data[0]; data_island_data[1 : 0] <= {vsync, hsync}; end        end    end    else // DVI_OUTPUT = 1    begin        always_ff @(posedge clk_pixel)        begin            if(reset)            begin                mode <= 3'd0; video_data <= 24'd0; control_data <= 6'd0; end            else            begin                mode <= video_data_period ? 3'd1 : 3'd0; video_data <= rgb; control_data <= {4'b0000, {vsync, hsync}}; // ctrl3, ctrl2, ctrl1, ctrl0, vsync, hsync            end        end    end
+    if(!DVI_OUTPUT)
+    begin : true_hdmi_output
+        logic video_guard = 1;
+        logic video_preamble = 0;
+        always_ff @(posedge clk_pixel)
+        begin
+            if(reset)
+            begin
+                video_guard    <= 1;
+                video_preamble <= 0;
+            end
+            else
+            begin
+                video_guard    <= cx >= frame_width - 2 && cx < frame_width && (cy == frame_height - 1 || cy < screen_height - 1 /* no VG at end of last line */);
+                video_preamble <= cx >= frame_width - 10 && cx < frame_width - 2 && (cy == frame_height - 1 || cy < screen_height - 1 /* no VP at end of last line */);
+            end
+        end
+
+        // See Section 5.2.3.1
+        int max_num_packets_alongside;
+        logic[4 : 0] num_packets_alongside;
+        always_comb
+        begin
+            max_num_packets_alongside = (frame_width - screen_width  /* VD period */ - 2 /* V guard */ - 8 /* V preamble */ - 4 /* Min V control period */ - 2 /* DI trailing guard */ - 2 /* DI leading guard */ - 8 /* DI premable */ - 4 /* Min DI control period */) / 32;
+            if(max_num_packets_alongside > 18)
+                num_packets_alongside = 5'd18;
+            else
+                num_packets_alongside = 5'(max_num_packets_alongside);
+        end
+
+        logic data_island_period_instantaneous;
+        assign data_island_period_instantaneous = num_packets_alongside > 0 && cx >= screen_width + 14 && cx < screen_width + 14 + num_packets_alongside * 32;
+        logic packet_enable;
+        assign packet_enable = data_island_period_instantaneous && 5'(cx + screen_width + 18) == 5'd0;
+
+        logic data_island_guard = 0;
+        logic data_island_preamble = 0;
+        logic data_island_period = 0;
+        always_ff @(posedge clk_pixel)
+        begin
+            if(reset)
+            begin
+                data_island_guard    <= 0;
+                data_island_preamble <= 0;
+                data_island_period   <= 0;
+            end
+            else
+            begin
+                data_island_guard    <= num_packets_alongside > 0 && ((cx >= screen_width + 12 && cx < screen_width + 14) /* leading guard */ || (cx >= screen_width + 14 + num_packets_alongside * 32 && cx < screen_width + 14 + num_packets_alongside * 32 + 2) /* trailing guard */
+                );
+                data_island_preamble <= num_packets_alongside > 0 && cx >= screen_width + 4 && cx < screen_width + 12;
+                data_island_period   <= data_island_period_instantaneous;
+            end
+        end
+
+        // See Section 5.2.3.4
+        logic[23 : 0] header;
+        logic[55 : 0] sub[3 : 0];
+        logic video_field_end;
+        assign video_field_end = cx == screen_width - 1'b1 && cy == screen_height - 1'b1;
+        logic[4 : 0] packet_pixel_counter;
+        packet_picker #
+        (
+            .VIDEO_ID_CODE             (  VIDEO_ID_CODE              ),
+            .VIDEO_RATE                (  VIDEO_RATE                 ),
+            .IT_CONTENT                (  IT_CONTENT                 ),
+            .AUDIO_RATE                (  AUDIO_RATE                 ),
+            .AUDIO_BIT_WIDTH           (  AUDIO_BIT_WIDTH            ),
+            .VENDOR_NAME               (  VENDOR_NAME                ),
+            .PRODUCT_DESCRIPTION       (  PRODUCT_DESCRIPTION        ),
+            .SOURCE_DEVICE_INFORMATION (  SOURCE_DEVICE_INFORMATION  )
+        )
+        packet_picker
+        (
+            .clk_pixel                 (  clk_pixel                  ),
+            .clk_audio                 (  clk_audio                  ),
+            .reset                     (  reset                      ),
+            .video_field_end           (  video_field_end            ),
+            .packet_enable             (  packet_enable              ),
+            .packet_pixel_counter      (  packet_pixel_counter       ),
+            .audio_sample_word         (  audio_sample_word          ),
+            .header                    (  header                     ),
+            .sub                       (  sub                        )
+        );
+        logic[8 : 0] packet_data;
+        packet_assembler packet_assembler
+        (
+            .clk_pixel          (  clk_pixel             ),
+            .reset              (  reset                 ),
+            .data_island_period (  data_island_period    ),
+            .header             (  header                ),
+            .sub                (  sub                   ),
+            .packet_data        (  packet_data           ),
+            .counter            (  packet_pixel_counter  )
+        );
+
+        always_ff @(posedge clk_pixel)
+        begin
+            if(reset)
+            begin
+                mode             <= 3'd2;
+                video_data       <= 24'd0;
+                control_data     = 6'd0;
+                data_island_data <= 12'd0;
+            end
+            else
+            begin
+                mode                   <= data_island_guard ? 3'd4 : data_island_period ? 3'd3 : video_guard ? 3'd2 : video_data_period ? 3'd1 : 3'd0;
+                video_data             <= rgb;
+                control_data           <= {{1'b0, data_island_preamble}, {1'b0, video_preamble || data_island_preamble}, {vsync, hsync}};                // ctrl3, ctrl2, ctrl1, ctrl0, vsync, hsync
+                data_island_data[11:4] <= packet_data[8:1];
+                data_island_data[3]    <= cx != 0;
+                data_island_data[2]    <= packet_data[0];
+                data_island_data[1:0]  <= {vsync, hsync};
+            end
+        end
+    end
+    else // DVI_OUTPUT = 1
+    begin
+        always_ff @(posedge clk_pixel)
+        begin
+            if(reset)
+            begin
+                mode         <= 3'd0;
+                video_data   <= 24'd0;
+                control_data <= 6'd0;
+            end
+            else
+            begin
+                mode         <= video_data_period ? 3'd1 : 3'd0;
+                video_data   <= rgb;
+                control_data <= {4'b0000, {vsync, hsync}};         // ctrl3, ctrl2, ctrl1, ctrl0, vsync, hsync
+            end
+        end
+    end
 endgenerate
 
 // All logic below relates to the production and output of the 10-bit TMDS code.
