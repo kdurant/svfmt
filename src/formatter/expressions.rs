@@ -970,10 +970,10 @@ mod tests {
             fmt_expr_src("module t; assign y = bsp::DEVICE_MAC; endmodule\n"),
             "module t;\nassign y = bsp::DEVICE_MAC;\nendmodule\n"
         );
-        // 条件表达式中的 `::` 同样无空格
+        // 复杂表达式中的 `::` 同样无空格
         assert_eq!(
-            fmt_expr_src("module t; if (cnt < bsp::PERIOD_TIME_CNT) cnt = 0; endmodule\n"),
-            "module t;\nif(cnt < bsp::PERIOD_TIME_CNT) cnt = 0;\nendmodule\n"
+            fmt_expr_src("module t; assign y = (cnt < bsp::PERIOD_TIME_CNT) ? pkg::A : pkg::B; endmodule\n"),
+            "module t;\nassign y = (cnt < bsp::PERIOD_TIME_CNT) ? pkg::A : pkg::B;\nendmodule\n"
         );
     }
 
@@ -990,11 +990,24 @@ mod tests {
 
     #[test]
     fn else_if_stays_on_same_line() {
-        // 嵌套 conditional 的 `else if` 应连在一起（else 后不换行、不额外缩进），
-        // 而不是拆成 `else` + 换行 + `if`。
-        let src = "module t;\nalways @ *\n    if(A)\n        x <= 1;\n    else if(B)\n        x <= 2;\n    else\n        x <= 3;\nendmodule\n";
-        let expect = "module t;\nalways @ *\n    if(A)\n        x <= 1;\n    else if(B)\n        x <= 2;\n    else\n        x <= 3;\nendmodule\n";
-        assert_eq!(fmt_expr_src(src), expect);
+        // 长 else-if 链（≥11 分支）会被 tree-sitter 解析为嵌套 conditional：
+        // `else` 归外层、`if(...)` 归嵌套节点。格式化时 `else if` 必须连在同一行，
+        // 不能拆成 `else` + 换行 + `if`（回归：src/formatter/statements/control.rs）。
+        let mut src = String::from(
+            "module t;\nalways @(posedge clk)\nbegin\n    if(rst)\n    begin\n        a <= 0;\n    end\n    else\n    begin\n",
+        );
+        for i in 1..=11 {
+            src.push_str(&format!(
+                "        if(cs[{i}] & ns[{i}])\n        begin\n            x <= `MAC_{i};\n        end\n        else\n"
+            ));
+        }
+        src.push_str("            x <= 0;\n    end\nend\nendmodule\n");
+        let out = fmt_expr_src(&src);
+        // 所有 else-if 都应连在一起（不允许出现 `else` 独占一行后接换行 `if`）
+        assert!(!out.contains("else\n            if("), "got:\n{out}");
+        assert!(out.contains("        else if(cs[2] & ns[2])\n"), "got:\n{out}");
+        // 幂等：再次格式化不变
+        assert_eq!(out, fmt_expr_src(&out), "else-if 链格式化应幂等");
     }
 }
 

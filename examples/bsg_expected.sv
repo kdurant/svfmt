@@ -39,7 +39,7 @@ module bsg_manycore_endpoint import bsg_manycore_pkg::*; #
     output                                      return_packet_fifo_full_o
 );
 
-` declare_bsg_manycore_link_sif_s(addr_width_p, data_width_p, x_cord_width_p, y_cord_width_p) ;
+`declare_bsg_manycore_link_sif_s(addr_width_p, data_width_p, x_cord_width_p, y_cord_width_p) ;
 
 // typecast
 bsg_manycore_link_sif_s link_sif_in, link_sif_out;
@@ -132,4 +132,4 @@ end
 
 endmodule
 
-` BSG_ABSTRACT_MODULE(bsg_manycore_endpoint)
+`BSG_ABSTRACT_MODULE(bsg_manycore_endpoint)

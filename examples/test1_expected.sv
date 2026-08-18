@@ -75,7 +75,7 @@ end
 
 if_axi_stream #(.DATA_WIDTH(8)) fifo_if();
 
-assign dev_info.fpga_version     = ` PROJECT_VERSION_FULL;
+assign dev_info.fpga_version     = `PROJECT_VERSION_FULL;
 assign dev_info.fpga_dna[127:57] = 0;
 assign dev_info.device_sn        = "1122334455667788";
 assign dev_info.device_type      = 1;

@@ -720,3 +720,60 @@ fn parameter_connections_nodes<'a>(_f: &Formatter<'a>, node: CstNode<'a>) -> Vec
 fn render_doc(f: &Formatter<'_>, doc: crate::document::Doc) -> String {
     crate::document::render_inline(&doc, f.cfg)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::FormatterConfig;
+    use crate::document::{RenderOptions, render};
+    use crate::parser::SvParser;
+
+    fn fmt_module_src(src: &str) -> String {
+        let cfg = FormatterConfig::default();
+        let f = Formatter::new(&cfg, src);
+        let mut parser = SvParser::new().unwrap();
+        let tree = parser.parse(src).unwrap();
+        let doc = f.fmt(tree.root_node());
+        let opts = RenderOptions::from(&cfg);
+        render(&doc, &opts)
+    }
+
+    /// 普通多行端口连接：name 与 value 分别列对齐，右括号垂直对齐。
+    #[test]
+    fn aligned_port_connections() {
+        let src = "module t;\nfoo u(\n.a(clk),\n.bbb(rst),\n.ccc(dout)\n);\nendmodule\n";
+        let out = fmt_module_src(src);
+        // name 列对齐（最宽 `.bbb`=4 → `(` 在第 5 列）；
+        // value 列对齐（最宽 `dout`=4 → inner+value_max+inner 固定宽度）。
+        assert!(out.contains("    .a   (  clk   ),\n"), "got:\n{out}");
+        assert!(out.contains("    .bbb (  rst   ),\n"), "got:\n{out}");
+        assert!(out.contains("    .ccc (  dout  )\n"), "got:\n{out}");
+    }
+
+    /// 含花括号拼接端口时，普通单行值的右括号仍按共享 value_max 对齐。
+    /// 回归：此前 wrapped_connections 对普通单行值不按 value_max pad，右括号错位。
+    #[test]
+    fn concat_port_keeps_plain_values_aligned() {
+        let src = "module t;\nfoo u(\n.a(clk),\n.b({x, y}),\n.ccc(mem_data)\n);\nendmodule\n";
+        let out = fmt_module_src(src);
+        // 普通值最宽 `mem_data`=8 → value_max=8，`.a` 的 `clk`(3) pad 到 8 宽。
+        // `.a   (  clk       )`：clk 后补 5 空格 + inner 2 = 7 空格
+        assert!(out.contains("    .a   (  clk       ),\n"), "got:\n{out}");
+        assert!(out.contains("    .ccc (  mem_data  )\n"), "got:\n{out}");
+        // concat 的闭合 `}` 单独一行（花括号值多行排版）
+        assert!(out.contains("}  ),\n"), "got:\n{out}");
+    }
+
+    /// 含参数段时，concat 的 `}` 用共享 value_max（含参数段更宽值）对齐，
+    /// 而非端口段局部最大值。回归：此前用端口段局部 max 导致 `}` 比普通值右括号靠左。
+    #[test]
+    fn concat_close_brace_uses_shared_value_max_with_params() {
+        let src = "module t;\nfoo #(\n.PARAM_LONG(very_long_value_here)\n) u(\n.a(clk),\n.b({x, y})\n);\nendmodule\n";
+        let out = fmt_module_src(src);
+        // 共享 value_max 由参数段 `very_long_value_here`(20) 决定，
+        // 端口段普通值 `.a` 的 `clk` pad 到 20 宽（补 17 + inner 2 = 19 空格）。
+        assert!(out.contains("    .a          (  clk                   ),\n"), "got:\n{out}");
+        // concat `}` 对齐到普通值右括号列（`.b` 为最后一个连接，无逗号）
+        assert!(out.contains("}  )\n"), "got:\n{out}");
+    }
+}
