@@ -64,4 +64,13 @@ wire                   sataAppReg_tvalid   ;
 wire                   sataAppReg_tready =1  ;
 wire         [31:0]    sataAppReg_tdata    ;
 
+ila_128x4096 ila_128x4096Ex01 
+(
+	.clk                    (  clk_125m                         ),
+	.probe0                 (  {
+                    trg , laser_pulse,
+                    axis_preview_tvalid, axis_preview_tdata, axis_preview_tready, axis_preview_tlast, axis_preview_tlen, axis_gps_tdata, 
+                    axis_gps_tvalid, axis_gps_tready, axis_gps_tlast, axis_process_if.tdata, axis_process_if.tvalid, axis_process_if.tready, axis_process_if.tlast
+    })
+);
 endmodule

@@ -10,7 +10,7 @@ use crate::formatter::tokens::has_newline;
 use crate::parser::CstNode;
 
 // 子模块对外接口 re-export（dispatch 与跨模块引用统一经此路径）
-pub(crate) use case::{fmt_case_item, fmt_case_statement};
+pub(crate) use case::{fmt_case_generate_construct, fmt_case_item, fmt_case_statement};
 pub(crate) use control::{fmt_assert, fmt_body, fmt_conditional};
 
 /// 解包 statement/statement_or_null/statement_item 包装，返回实际语句节点。
@@ -686,6 +686,10 @@ pub fn fmt_seq_block_with_label(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
 
 /// generate 区域。
 pub fn fmt_generate(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
+    // generate_block（begin...end）：内部连续 assign 走模块体对齐段逻辑
+    if node.kind() == "generate_block" {
+        return fmt_generate_block(f, node);
+    }
     let mut docs: Vec<Doc> = Vec::new();
     let children = node.children();
     let mut prev_end: Option<usize> = None;
@@ -713,6 +717,83 @@ pub fn fmt_generate(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
         prev_end = Some(child.byte_range().end);
         first = false;
     }
+    Doc::concat(docs)
+}
+
+/// generate_block（begin ... end）：连续 assign 对齐段（复用模块体 emit_aligned_segment）。
+fn fmt_generate_block(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
+    let mut docs: Vec<Doc> = Vec::new();
+    let children: Vec<CstNode<'_>> = node.children();
+    let mut prev_end: Option<usize> = None;
+    let mut first = true;
+    let mut seg: Vec<CstNode<'_>> = Vec::new();
+
+    let flush = |f: &Formatter<'_>, seg: &mut Vec<CstNode<'_>>, docs: &mut Vec<Doc>| {
+        if seg.is_empty() {
+            return;
+        }
+        if !docs.is_empty()
+            && !matches!(docs.last(), Some(Doc::Newline) | Some(Doc::BlankLines(_)))
+        {
+            docs.push(Doc::Newline);
+        }
+        docs.push(Doc::Indent);
+        crate::formatter::module::emit_aligned_segment(f, seg, docs);
+        docs.push(Doc::Dedent);
+        seg.clear();
+    };
+
+    for child in children {
+        let is_kw = matches!(child.kind(), "begin" | "end");
+        let is_assign = child.kind() == "continuous_assign";
+
+        let (blank_before, has_nl, blanks) = if let Some(pe) = prev_end {
+            let ws = f.ws(pe, child.byte_range().start);
+            let b = crate::formatter::count_blank_lines(ws);
+            (b > 0, has_newline(ws), b)
+        } else {
+            (false, false, 0)
+        };
+
+        if is_assign && !blank_before {
+            // 连续 assign：收集进对齐段
+            if seg.is_empty() && !first {
+                // 段起始前需换行
+                docs.push(Doc::Newline);
+            }
+            seg.push(child);
+            prev_end = Some(child.byte_range().end);
+            first = false;
+            continue;
+        }
+
+        // 非 assign：先冲刷对齐段
+        flush(f, &mut seg, &mut docs);
+
+        if !first {
+            let ws = prev_end
+                .map(|pe| f.ws(pe, child.byte_range().start))
+                .unwrap_or("");
+            let _ = ws;
+            if blank_before {
+                docs.push(Doc::BlankLines(blanks));
+            } else if has_nl {
+                docs.push(Doc::Newline);
+            } else {
+                docs.push(Doc::Space);
+            }
+        }
+        if !is_kw {
+            docs.push(Doc::Indent);
+        }
+        docs.push(f.fmt(child));
+        if !is_kw {
+            docs.push(Doc::Dedent);
+        }
+        prev_end = Some(child.byte_range().end);
+        first = false;
+    }
+    flush(f, &mut seg, &mut docs);
     Doc::concat(docs)
 }
 

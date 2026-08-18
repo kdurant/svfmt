@@ -241,7 +241,7 @@ fn decl_has_eq(f: &Formatter<'_>, node: CstNode<'_>) -> bool {
 }
 
 /// 输出一个对齐段。
-fn emit_aligned_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs: &mut Vec<Doc>) {
+pub(crate) fn emit_aligned_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs: &mut Vec<Doc>) {
     // 检测段内是否有赋值/初始化 `=`（localparam、assign、带初始化的声明）
     let has_eq = seg.iter().any(|n| {
         matches!(

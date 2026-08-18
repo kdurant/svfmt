@@ -569,12 +569,8 @@ fn fmt_children_expr(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc
                     docs.push(Doc::Newline);
                 } else {
                     let sep = token_sep(f, Some(&p), &tok, ctx);
-                    // 二元运算符前：超宽时断行（column_limit）
-                    if is_binary_op(tok.kind) && sep == Sep::Space {
-                        docs.push(Doc::SoftLine);
-                    } else {
-                        apply_sep(f, &mut docs, &p, &tok, sep);
-                    }
+                    // fallback（token 序列）路径不发射 SoftLine，避免破坏语句结构。
+                    apply_sep(f, &mut docs, &p, &tok, sep);
                 }
             }
             docs.push(Doc::text(tok.text));
@@ -728,7 +724,12 @@ fn fmt_concat(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
                 } else {
                     token_sep(f, Some(&p), &tok, &inner)
                 };
-                apply_sep(f, &mut docs, &p, &tok, sep);
+                // 逗号后：超宽时断行（column_limit）
+                if p.kind == "," && sep == Sep::Space {
+                    docs.push(Doc::SoftLine);
+                } else {
+                    apply_sep(f, &mut docs, &p, &tok, sep);
+                }
             }
             docs.push(d);
             if let Some(t) = last_token_of(child) {
@@ -751,7 +752,8 @@ fn fmt_concat(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
         }
     }
     docs.push(Doc::text("}"));
-    Doc::concat(docs)
+    // 拼接用 Fill：超宽时贪心逐项断行（能放下就继续），而非全有或全无。
+    Doc::Fill(docs)
 }
 
 fn fmt_range(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
@@ -880,12 +882,7 @@ pub fn fmt_assignment(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Do
                 } else {
                     Sep::None
                 };
-                // 赋值符后：超宽时断行（column_limit）
-                if is_assignment_op(p.kind) && sep == Sep::Space {
-                    docs.push(Doc::SoftLine);
-                } else {
-                    apply_sep(f, &mut docs, &p, &tok, sep);
-                }
+                apply_sep(f, &mut docs, &p, &tok, sep);
             }
             docs.push(fmt_expr(f, child, ctx));
             if let Some(t) = last_token_of(child) {

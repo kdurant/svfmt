@@ -263,6 +263,131 @@ pub(crate) fn fmt_case_statement(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     Doc::concat(docs)
 }
 
+/// case_generate_construct（generate 内 case）。
+pub(crate) fn fmt_case_generate_construct(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
+    let mut docs: Vec<Doc> = Vec::new();
+    let items: Vec<CstNode<'_>> = node.children();
+
+    // case 关键字 + 表达式头
+    let mut i = 0usize;
+    while i < items.len() {
+        let c = items[i];
+        match c.kind() {
+            "case" | "casez" | "casex" => {
+                docs.push(Doc::text(c.text()));
+                if f.cfg.space.before_control_statement_parens {
+                    docs.push(Doc::Space);
+                }
+                i += 1;
+            }
+            "(" => {
+                docs.push(Doc::text("("));
+                i += 1;
+            }
+            ")" => {
+                docs.push(Doc::text(")"));
+                i += 1;
+            }
+            "case_generate_item" | "endcase" => break,
+            _ if c.is_named() => {
+                docs.push(fmt_expr(
+                    f,
+                    c,
+                    &crate::formatter::expressions::ExprCtx::default(),
+                ));
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+
+    // case item
+    let events: Vec<CstNode<'_>> = items
+        .iter()
+        .copied()
+        .skip(i)
+        .take_while(|c| c.kind() != "endcase")
+        .filter(|c| {
+            c.kind() == "case_generate_item" || (c.is_named() && c.kind().ends_with("comment"))
+        })
+        .collect();
+
+    docs.push(Doc::Newline);
+    for _ in 0..f.cfg.case_indent_level {
+        docs.push(Doc::Indent);
+    }
+
+    let mut prev_end: Option<usize> = None;
+    let mut first = true;
+    for c in &events {
+        if !first {
+            let ws = prev_end
+                .map(|pe| f.ws(pe, c.byte_range().start))
+                .unwrap_or("");
+            let blanks = crate::formatter::count_blank_lines(ws);
+            if blanks > 0 {
+                docs.push(Doc::BlankLines(blanks));
+            } else {
+                docs.push(Doc::Newline);
+            }
+        }
+        if c.kind() == "case_generate_item" {
+            docs.push(fmt_case_generate_item(f, *c));
+        } else {
+            docs.push(Doc::text(f.comment_text(*c)));
+        }
+        prev_end = Some(c.byte_range().end);
+        first = false;
+    }
+
+    docs.push(Doc::Dedent);
+    docs.push(Doc::Newline);
+    docs.push(Doc::text("endcase"));
+    Doc::concat(docs)
+}
+
+fn fmt_case_generate_item(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
+    let mut docs: Vec<Doc> = Vec::new();
+    let items: Vec<CstNode<'_>> = node.children();
+
+    let mut seen_colon = false;
+    let mut body: Option<CstNode<'_>> = None;
+    let mut pending_space = false;
+
+    for c in &items {
+        if c.kind() == ":" {
+            docs.push(Doc::text(":"));
+            seen_colon = true;
+            continue;
+        }
+        if !seen_colon {
+            if c.is_named() {
+                if pending_space {
+                    docs.push(Doc::Space);
+                    pending_space = false;
+                }
+                docs.push(fmt_expr(
+                    f,
+                    *c,
+                    &crate::formatter::expressions::ExprCtx::default(),
+                ));
+            } else if c.kind() == "," {
+                docs.push(Doc::text(","));
+                pending_space = true;
+            }
+        } else if c.is_named() {
+            body = Some(*c);
+            break;
+        }
+    }
+
+    if let Some(b) = body {
+        docs.push(Doc::Newline);
+        docs.push(f.fmt(b));
+    }
+    Doc::concat(docs)
+}
+
 /// case_item 的 body 风格："inline"（单语句同行）/ "seq" / "cond"。
 fn case_item_body_style(f: &Formatter<'_>, node: CstNode<'_>) -> &'static str {
     let mut seen_colon = false;

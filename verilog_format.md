@@ -102,11 +102,15 @@ end
 每行最大列数（字符数）。超过后格式化器将在可断行点换行：
 - **函数调用 / 系统任务调用的参数**（左括号后、逗号后）
 - **结构化表达式**（二元运算符前、逗号后）
+- **拼接 `{...}`**（逗号后，贪心填满每行）
+- **实例端口连接**：对齐布局最宽行超限时回退为"换行模式"——保留名字对齐，
+  值在逗号/运算符处断行（续行缩进 +1 级）
 
-注意：**对齐段**（模块体连续赋值、seq_block 赋值段、实例端口连接）依赖单行
-文本计算列宽，为保持对齐结构稳定，其 RHS **不受 column_limit 影响**（始终单行）。
+注意：**对齐段**（模块体连续赋值、seq_block 赋值段）依赖单行文本计算列宽，
+为保持对齐结构稳定，其 RHS **不受 column_limit 影响**（始终单行）。
+实例端口连接已改为超宽时换行（见上）。
 
-- 默认： 0
+- 默认： 100
 - 可选值： 0（不限制）或正整数
 
 ### column_limit: 40
@@ -127,6 +131,19 @@ initial
 begin
     $display("very long format string %d %d", a, b, c);
 end
+```
+
+### 实例端口连接超宽时换行（保留名字对齐）
+```verilog
+ila_128x4096 ila_128x4096Ex01
+(
+    .clk    (  clk_125m  ),
+    .probe0 (  {trg, laser_pulse, axis_preview_tvalid, axis_preview_tdata,
+        axis_preview_tready, axis_preview_tlast, axis_preview_tlen,
+        axis_gps_tdata, axis_gps_tvalid, axis_gps_tready, axis_gps_tlast,
+        axis_process_if.tdata, axis_process_if.tvalid, axis_process_if.tready,
+        axis_process_if.tlast}  )
+);
 ```
 
 ### 对齐段保持单行（不受 column_limit 影响）

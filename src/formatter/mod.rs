@@ -209,12 +209,22 @@ impl<'a> Formatter<'a> {
             "seq_block" => statements::fmt_seq_block(self, node),
             "conditional_statement" => statements::fmt_conditional(self, node),
             "case_statement" => statements::fmt_case_statement(self, node),
+            "case_generate_construct" => statements::fmt_case_generate_construct(self, node),
             "case_item" => statements::fmt_case_item(self, node, &[]),
             "simple_immediate_assert_statement" => statements::fmt_assert(self, node),
             "loop_statement" => statements::fmt_loop_statement(self, node),
             "generate_region" | "generate_block" => statements::fmt_generate(self, node),
-            "loop_generate_construct" | "conditional_generate_construct" => {
-                statements::fmt_loop_statement(self, node)
+            "loop_generate_construct" => statements::fmt_loop_statement(self, node),
+            "conditional_generate_construct" => {
+                if let Some(child) = node.named_child(0) {
+                    if child.kind() == "case_generate_construct" {
+                        statements::fmt_case_generate_construct(self, child)
+                    } else {
+                        statements::fmt_loop_statement(self, node)
+                    }
+                } else {
+                    statements::fmt_loop_statement(self, node)
+                }
             }
             "statement_or_null" | "statement" | "statement_item" => self.fmt_statement(node),
             "module_item" => {
@@ -352,6 +362,7 @@ fn ends_with_semi(doc: &Doc) -> bool {
             // 逆序查找最后一个 Text：跳过末尾的 Indent/Dedent/Newline 等
             // 非文本元素（如 fmt_assert 的结构化输出以 Dedent 结尾）。
             Doc::Group(children) => children.iter().rev().find_map(last_text),
+            Doc::Fill(children) => children.iter().rev().find_map(last_text),
             _ => None,
         }
     }

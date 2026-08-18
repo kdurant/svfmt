@@ -1,7 +1,7 @@
 //! `column_limit` 断行功能测试。
 //!
 //! column_limit > 0 时，结构化路径（函数调用参数、表达式容器）在超宽时
-//! 断行；column_limit = 0（默认）保持单行。对齐段（模块体 assign、seq_block
+//! 断行；column_limit = 0 保持单行。对齐段（模块体 assign、seq_block
 //! 赋值段、实例端口连接）依赖单行文本计算列宽，强制保持单行（不受
 //! column_limit 影响）。所有断行必须是确定性的（幂等）。
 

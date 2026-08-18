@@ -241,7 +241,7 @@ endmodule
     let a = dir.join("a.sv");
     std::fs::write(&a, src).unwrap();
 
-    // 默认（column_limit=0）：不断行
+    // 默认（column_limit=100）：该行 70 列，未超限 → 不断行
     let out = Command::new(svfmt_bin()).arg(&a).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
@@ -395,8 +395,5 @@ endmodule
         stdout.contains("casex(a)"),
         "--reformat-case casex 应统一为 casex: {stdout}"
     );
-    assert!(
-        !stdout.contains("casez(a)"),
-        "不应残留 casez: {stdout}"
-    );
+    assert!(!stdout.contains("casez(a)"), "不应残留 casez: {stdout}");
 }

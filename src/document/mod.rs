@@ -25,6 +25,11 @@ pub enum Doc {
     Dedent,
     /// 一组内容，其中的 [`Doc::SoftLine`] 可以在超宽时换行。
     Group(Vec<Doc>),
+    /// 填充式组：其中的 [`Doc::SoftLine`] 在超宽时**贪心断行**——
+    /// 能放下就继续（SoftLine 作空格），放不下才在 SoftLine 处换行。
+    /// 与 [`Doc::Group`] 的"全有或全无"不同，用于列表/拼接等希望
+    /// 尽量填满每行的场景（如拼接 `{a, b, c, ...}` 超宽时逐项断行）。
+    Fill(Vec<Doc>),
     /// 软换行点：组内超宽时断行，否则当作一个空格。
     SoftLine,
     /// 软换行点（无空隙）：组内超宽时断行，否则不输出任何内容。
@@ -36,6 +41,9 @@ pub enum Doc {
     Col0,
     /// 无输出。
     Nil,
+    /// 尾部填充：输出空格使当前列宽达到 `target`（用于右括号列对齐）。
+    /// 当前已超过 target 时不输出任何内容。
+    Pad(usize),
 }
 
 impl Doc {
@@ -125,6 +133,16 @@ impl Renderer<'_> {
     fn emit(&mut self, doc: &Doc) {
         match doc {
             Doc::Nil => {}
+            Doc::Pad(target) => {
+                let target = *target;
+                if self.column < target {
+                    let pad = target - self.column;
+                    for _ in 0..pad {
+                        self.out.push(' ');
+                    }
+                    self.column = target;
+                }
+            }
             Doc::Text(s) => {
                 self.write_raw(s);
             }
@@ -169,6 +187,15 @@ impl Renderer<'_> {
                     self.emit_group(children, 0);
                 }
             }
+            Doc::Fill(children) => {
+                if self.options.column_limit == 0 {
+                    for c in children {
+                        self.emit(c);
+                    }
+                } else {
+                    self.emit_fill(children);
+                }
+            }
             Doc::SoftLine => {
                 self.write_indent();
                 self.out.push(' ');
@@ -187,13 +214,13 @@ impl Renderer<'_> {
         }
     }
 
-    fn emit_group(&mut self, children: &[Doc], depth: usize) {
+    fn emit_group(&mut self, children: &[Doc], _depth: usize) {
         // 组内只考虑本组范围是否超出列宽；超宽则在 SoftLine 处换行。
         let mut trial = self.clone_partial();
         for c in children {
             trial.emit(c);
         }
-        let fits = trial.column <= self.options.column_limit || depth > 4;
+        let fits = trial.column <= self.options.column_limit || _depth > 4;
         if fits {
             for c in children {
                 self.emit(c);
@@ -205,6 +232,58 @@ impl Renderer<'_> {
                     _ => self.emit(c),
                 }
             }
+        }
+    }
+
+    /// 填充式渲染：逐"词"输出（词 = 到下一个断行点为止的内容），
+    /// 在 SoftLine 处检查下一词能否放下；放得下则 SoftLine 作空格继续，
+    /// 放不下才换行（贪心填满每行）。
+    fn emit_fill(&mut self, children: &[Doc]) {
+        let mut i = 0;
+        while i < children.len() {
+            // 找到下一个断行点
+            let mut j = i;
+            while j < children.len() && !matches!(children[j], Doc::SoftLine | Doc::SoftLineNil) {
+                j += 1;
+            }
+            // 输出 [i, j) 之间的内容（不含断行点）
+            for k in i..j {
+                self.emit(&children[k]);
+            }
+            if j >= children.len() {
+                break;
+            }
+            // children[j] 是断行点：检查其后下一个"词"能否放在当前行
+            // SoftLine 会输出一个空格，试排时需补偿 +1
+            let fits = if j + 1 < children.len() {
+                let mut trial = self.clone_partial();
+                if matches!(&children[j], Doc::SoftLine) {
+                    trial.column += 1;
+                }
+                let mut k = j + 1;
+                while k < children.len() && !matches!(children[k], Doc::SoftLine | Doc::SoftLineNil)
+                {
+                    trial.emit(&children[k]);
+                    k += 1;
+                }
+                trial.column <= self.options.column_limit
+            } else {
+                true
+            };
+            if fits {
+                match &children[j] {
+                    Doc::SoftLine => {
+                        self.write_indent();
+                        self.out.push(' ');
+                        self.column += 1;
+                    }
+                    Doc::SoftLineNil => {}
+                    _ => {}
+                }
+            } else {
+                self.newline();
+            }
+            i = j + 1;
         }
     }
 
@@ -298,12 +377,23 @@ impl RendererPart<'_> {
     fn emit(&mut self, doc: &Doc) {
         match doc {
             Doc::Nil | Doc::Indent | Doc::Dedent | Doc::SoftLineNil | Doc::Col0 => {}
+            Doc::Pad(target) => {
+                let target = *target;
+                if self.column < target {
+                    self.column = target;
+                }
+            }
             Doc::Text(s) => self.column += display_width(s, self.options.tab_width),
             Doc::Space | Doc::SoftLine => self.column += 1,
             Doc::Newline | Doc::BlankLines(_) => {
                 self.column = self.options.indent_width.saturating_mul(0);
             }
             Doc::Group(children) => {
+                for c in children {
+                    self.emit(c);
+                }
+            }
+            Doc::Fill(children) => {
                 for c in children {
                     self.emit(c);
                 }
@@ -409,6 +499,40 @@ mod tests {
     fn soft_line_renders_as_space_when_unlimited() {
         let doc = Doc::concat(vec![Doc::text("a"), Doc::SoftLine, Doc::text("b")]);
         assert_eq!(render(&doc, &opts()), "a b");
+    }
+
+    #[test]
+    fn fill_breaks_greedily() {
+        let doc = Doc::Fill(vec![
+            Doc::text("{trg,"),
+            Doc::SoftLine,
+            Doc::text("laser_pulse,"),
+            Doc::SoftLine,
+            Doc::text("axis_preview_tvalid,"),
+            Doc::SoftLine,
+            Doc::text("axis_preview_tdata}"),
+        ]);
+        let mut o = opts();
+        o.column_limit = 40;
+        let out = render(&doc, &o);
+        assert_eq!(
+            out,
+            "{trg, laser_pulse, axis_preview_tvalid,\naxis_preview_tdata}"
+        );
+    }
+
+    #[test]
+    fn fill_flat_when_fits() {
+        let doc = Doc::Fill(vec![
+            Doc::text("{a,"),
+            Doc::SoftLine,
+            Doc::text("b,"),
+            Doc::SoftLine,
+            Doc::text("c}"),
+        ]);
+        let mut o = opts();
+        o.column_limit = 40;
+        assert_eq!(render(&doc, &o), "{a, b, c}");
     }
 
     #[test]

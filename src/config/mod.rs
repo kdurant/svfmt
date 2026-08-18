@@ -135,7 +135,7 @@ pub struct FormatterConfig {
     pub tab_width: u32,
 
     /// 每行最大列数，0 表示不限制。
-    #[serde(default = "default_zero")]
+    #[serde(default = "default_column_limit")]
     pub column_limit: u32,
     /// 是否删除行尾多余空格与制表符。
     #[serde(default = "default_true")]
@@ -223,8 +223,8 @@ fn default_two() -> u32 {
 fn default_one() -> u32 {
     1
 }
-fn default_zero() -> u32 {
-    0
+fn default_column_limit() -> u32 {
+    100
 }
 fn default_true() -> bool {
     true
@@ -240,7 +240,7 @@ impl Default for FormatterConfig {
             indent_module_contents: false,
             use_tab: false,
             tab_width: 4,
-            column_limit: 0,
+            column_limit: 100,
             trim_trailing_whitespace: true,
             space: SpaceConfig::default(),
             max_consecutive_blank_lines: 1,
@@ -296,7 +296,7 @@ mod tests {
         let cfg = FormatterConfig::default();
         assert_eq!(cfg.indent_width, 4);
         assert!(!cfg.indent_module_contents);
-        assert_eq!(cfg.column_limit, 0);
+        assert_eq!(cfg.column_limit, 100);
         assert!(cfg.trim_trailing_whitespace);
         assert!(cfg.space.around_binary_operator);
         assert!(cfg.space.after_comma);
