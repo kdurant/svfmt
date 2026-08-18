@@ -848,7 +848,9 @@ pub fn fmt_if_generate_construct(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                 if let Some(next) = items.get(j + 1)
                     && next.is_named()
                     && next.kind().ends_with("comment")
-                    && !f.ws(c.byte_range().end, next.byte_range().start).contains('\n')
+                    && !f
+                        .ws(c.byte_range().end, next.byte_range().start)
+                        .contains('\n')
                 {
                     docs.push(Doc::Space);
                     docs.push(Doc::text(next.text()));
