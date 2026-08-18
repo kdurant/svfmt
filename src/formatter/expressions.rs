@@ -203,12 +203,14 @@ fn is_unary_op(kind: &str) -> bool {
 pub fn token_sep(f: &Formatter<'_>, prev: Option<&Token>, cur: &Token, ctx: &ExprCtx) -> Sep {
     let cfg = &f.cfg;
     if let Some(prev) = prev {
-        // 宏名前的反引号
-        if prev.kind == "`" {
-            return Sep::Space;
-        }
+        // 宏引用反引号：反引号与宏名之间无空格（`MACRO）。
+        // 反引号作为 prev 时其后紧跟宏名 → 无空格；
+        // 反引号作为 cur 时其前（如二元运算符 `==` 后）需空格 → Space。
         if cur.kind == "`" {
             return Sep::Space;
+        }
+        if prev.kind == "`" {
+            return Sep::None;
         }
         // 点
         if prev.kind == "." || cur.kind == "." {
@@ -972,6 +974,17 @@ mod tests {
         assert_eq!(
             fmt_expr_src("module t; if (cnt < bsp::PERIOD_TIME_CNT) cnt = 0; endmodule\n"),
             "module t;\nif(cnt < bsp::PERIOD_TIME_CNT) cnt = 0;\nendmodule\n"
+        );
+    }
+
+    #[test]
+    fn macro_reference_has_no_space_between_backtick_and_name() {
+        // 宏引用 `MACRO：反引号与宏名之间无空格，但运算符与反引号之间保留空格
+        assert_eq!(
+            fmt_expr_src(
+                "module t; assign y = (flash_cmd == `FLASH_BUFFER_PROGRAM); endmodule\n"
+            ),
+            "module t;\nassign y = (flash_cmd == `FLASH_BUFFER_PROGRAM);\nendmodule\n"
         );
     }
 }

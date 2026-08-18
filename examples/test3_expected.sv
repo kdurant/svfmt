@@ -52,6 +52,8 @@ always @(posedge clk)
         sectorAddr[23 : 0] <= sataAppReg_tdata[23:0];
     else if((ST[WTST] | ST[RDAT]) & FIS_tvaild[2] & sataAppReg_tvalid & sataAppReg_tready)
         sectorAddr[47 : 24] <= sataAppReg_tdata[23:0];
+    else if(flash_cmd == `FLASH_BUFFER_PROGRAM)
+        ns[PROG_LOCK_SETUP] = 1'b1;
 
 always @ *
     case(1'b1)
