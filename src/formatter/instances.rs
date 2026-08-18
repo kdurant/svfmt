@@ -331,7 +331,7 @@ fn aligned_connections(
             ConnectionValue::Concat { .. } => false,
         });
     if has_concat || over_limit {
-        return wrapped_connections(f, &parsed, conns, name_max, inner);
+        return wrapped_connections(f, &parsed, conns, name_max, value_max, inner);
     }
     // 输出行，行间换行/空行（单行模式用空格分隔）
     let mut prev_ci: Option<usize> = None;
@@ -367,6 +367,7 @@ fn wrapped_connections(
     parsed: &[(String, ConnectionValue)],
     conns: &[CstNode<'_>],
     name_max: usize,
+    value_max: usize,
     inner: usize,
 ) -> Doc {
     let align = f.cfg.align_instance_ports;
@@ -387,22 +388,19 @@ fn wrapped_connections(
     } else {
         0
     };
+    // 单行普通值右括号的对齐列：`name_max+1 + '(' + inner + value_max + inner`，
+    // 即 `(` 所在列（name_max+1）右侧 name 后 1 列 '(' 加内边距与最宽值宽度。
+    // 当没有多行 Fill 值（pad_target == 0）时用它对齐单行普通值的 `)`；
+    // 存在多行值时取二者较大者，保证两类连接的右括号不右移丢失对齐。
+    let single_line_pad = name_max + 2 + inner + value_max;
+    let effective_pad = pad_target.max(single_line_pad);
     // 拼接连接闭合 `}` 的对齐前缀（相对行首）。
-    // 让 `}` 对齐到最宽普通连接 `)` 的位置，使所有连接（含拼接）的右括号垂直对齐：
-    // 单行连接 `)` 在 `name_max+1 + 1 + inner + value_width + inner`，
-    // 拼接 `}` 在其 `-1-inner` 处，即 `name_max+1 + value_width + inner`。
-    let max_normal_value_width: usize = parsed
-        .iter()
-        .filter_map(|(_, v)| match v {
-            ConnectionValue::Normal(d) => Some(display_width(
-                &render_doc(f, d.clone()),
-                f.cfg.tab_width as usize,
-            )),
-            ConnectionValue::Concat { .. } => None,
-        })
-        .max()
-        .unwrap_or(0);
-    let close_prefix = name_max + 1 + max_normal_value_width + inner;
+    // 让 `}` 对齐到最宽普通连接 `)` 的位置，使所有连接（含拼接）的右括号垂直对齐。
+    // 单行连接 `)` 相对内容列 = `name_max+1 + 1 + inner + value_max + inner`，
+    // 拼接 `}` 在其 `-1-inner` 处，即 `name_max+1 + value_max + inner`。
+    // 使用共享 value_max（含参数段）而非端口段局部最大值，保证与普通值实际
+    // 对齐列（value_max 列）一致。
+    let close_prefix = name_max + 1 + value_max + inner;
     let mut docs: Vec<Doc> = Vec::new();
     let mut prev_ci: Option<usize> = None;
     let mut pi = 0usize;
@@ -427,28 +425,45 @@ fn wrapped_connections(
         }
         let conn_docs = match value {
             ConnectionValue::Normal(d) => {
-                let mut conn_docs: Vec<Doc> = Vec::new();
-                if align {
-                    conn_docs.push(Doc::text(pad_col(name, name_max + 1)));
+                // 单行普通值：值渲染为单行、且宽度不超过 value_max（无需断行）时，
+                // 用字符串相对对齐到 value_max（与 aligned_connections 单行路径一致）。
+                // 相对对齐不受外层缩进影响，避免 Doc::Pad 用绝对列在模块缩进下失效。
+                let value_str = render_doc(f, d.clone());
+                let single_line_ok = align
+                    && !value_str.contains('\n')
+                    && display_width(&value_str, f.cfg.tab_width as usize) <= value_max;
+                if single_line_ok {
+                    let mut line = pad_col(name, name_max + 1);
+                    line.push('(');
+                    line.push_str(&" ".repeat(inner));
+                    line.push_str(&pad_col(&value_str, value_max));
+                    line.push_str(&" ".repeat(inner));
+                    line.push(')');
+                    vec![Doc::text(line)]
                 } else {
-                    conn_docs.push(Doc::text(name.clone()));
+                    let mut conn_docs: Vec<Doc> = Vec::new();
+                    if align {
+                        conn_docs.push(Doc::text(pad_col(name, name_max + 1)));
+                    } else {
+                        conn_docs.push(Doc::text(name.clone()));
+                    }
+                    conn_docs.push(Doc::text("("));
+                    if align {
+                        conn_docs.push(Doc::text(" ".repeat(inner)));
+                    }
+                    // 值：Indent 包裹使续行缩进 +1 级；值 Doc 自带 SoftLine 断行点
+                    conn_docs.push(Doc::Indent);
+                    conn_docs.push(d.clone());
+                    conn_docs.push(Doc::Dedent);
+                    if align && effective_pad > 0 {
+                        conn_docs.push(Doc::Pad(effective_pad));
+                    }
+                    if align {
+                        conn_docs.push(Doc::text(" ".repeat(inner)));
+                    }
+                    conn_docs.push(Doc::text(")"));
+                    conn_docs
                 }
-                conn_docs.push(Doc::text("("));
-                if align {
-                    conn_docs.push(Doc::text(" ".repeat(inner)));
-                }
-                // 值：Indent 包裹使续行缩进 +1 级；值 Doc 自带 SoftLine 断行点
-                conn_docs.push(Doc::Indent);
-                conn_docs.push(d.clone());
-                conn_docs.push(Doc::Dedent);
-                if align && pad_target > 0 {
-                    conn_docs.push(Doc::Pad(pad_target));
-                }
-                if align {
-                    conn_docs.push(Doc::text(" ".repeat(inner)));
-                }
-                conn_docs.push(Doc::text(")"));
-                conn_docs
             }
             ConnectionValue::Concat { inner_lines } => {
                 let mut conn_docs: Vec<Doc> = Vec::new();

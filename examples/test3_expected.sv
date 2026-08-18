@@ -87,11 +87,38 @@ ila_128x4096 ila_128x4096Ex02
                       }  )
 );
 
-generate
-    if(!DVI_OUTPUT)
-    begin : true_hdmi_output
-        mode <= 3'd0;
-    end
-endgenerate
+localparam FIFO_DEPTH       = 4096;
+localparam FIFO_DATA_WIDTH  = 16;
+localparam FIFO_COUNT_WIDTH = $clog2(FIFO_DEPTH) + 1;
+xpm_fifo_axis #
+(
+    .CLOCKING_MODE       (  "common_clock"    ),  // common_clock, independent_clock
+    .ECC_MODE            (  "no_ecc"          ),
+    .FIFO_DEPTH          (  FIFO_DEPTH        ),  // 16 - 4194304
+    .FIFO_MEMORY_TYPE    (  "auto"            ),  // auto, block, distributed, ultra
+    .PACKET_FIFO         (  "false"           ),  // true, false
+    .RD_DATA_COUNT_WIDTH (  FIFO_COUNT_WIDTH  ),
+    .TDATA_WIDTH         (  FIFO_DATA_WIDTH   ),
+    .TDEST_WIDTH         (  1                 ),  // 1 - 32
+    .USE_ADV_FEATURES    (  "1404"            ),  // String
+    .WR_DATA_COUNT_WIDTH (  FIFO_COUNT_WIDTH  )
+)
+xpm_fifo_axis_Ex01
+(
+    .s_aclk              (  clk               ),
+    .s_aresetn           (  1'b1              ),
+    .s_axis_tvalid       (  s_axis_tvalid     ),
+    .s_axis_tready       (  s_axis_tready     ),
+    .s_axis_tdata        (  {
+        s_axis_tdata[07:00], s_axis_tdata[15:08]
+                                           }  ),
+    .s_axis_tlast        (  s_axis_tlast      ),
+
+    .m_aclk              (  clk               ),
+    .m_axis_tvalid       (  m_axis_tvalid     ),
+    .m_axis_tready       (  m_axis_tready     ),
+    .m_axis_tdata        (  m_axis_tdata      ),
+    .m_axis_tlast        (  m_axis_tlast      )
+);
 
 endmodule
