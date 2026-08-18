@@ -987,6 +987,15 @@ mod tests {
             "module t;\nassign y = (flash_cmd == `FLASH_BUFFER_PROGRAM);\nendmodule\n"
         );
     }
+
+    #[test]
+    fn else_if_stays_on_same_line() {
+        // 嵌套 conditional 的 `else if` 应连在一起（else 后不换行、不额外缩进），
+        // 而不是拆成 `else` + 换行 + `if`。
+        let src = "module t;\nalways @ *\n    if(A)\n        x <= 1;\n    else if(B)\n        x <= 2;\n    else\n        x <= 3;\nendmodule\n";
+        let expect = "module t;\nalways @ *\n    if(A)\n        x <= 1;\n    else if(B)\n        x <= 2;\n    else\n        x <= 3;\nendmodule\n";
+        assert_eq!(fmt_expr_src(src), expect);
+    }
 }
 
 #[cfg(test)]

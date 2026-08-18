@@ -207,17 +207,23 @@ pub(crate) fn fmt_conditional(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                 cond_after_else = true;
             }
             "statement_or_null" => {
-                if is_else && !cond_after_else {
-                    if f.cfg.else_on_newline || f.cfg.end_on_newline {
-                        docs.push(Doc::Newline);
-                    } else {
-                        docs.push(Doc::Space);
-                    }
-                }
                 let inner = unwrap_statement(f, *child);
-                if matches!(inner.kind(), "seq_block" | "conditional_statement") {
-                    docs.push(fmt_body(f, *child, 0));
+                // else 后紧跟 if（`else if(...)`）：else 与嵌套 conditional 连在同一行，
+                // 嵌套 if 复用当前缩进基准（与外层 if 同列），不换行、不额外缩进。
+                if is_else && inner.kind() == "conditional_statement" {
+                    docs.push(Doc::Space);
+                    docs.push(fmt_conditional(f, inner));
                 } else {
+                    if is_else && !cond_after_else {
+                        if f.cfg.else_on_newline || f.cfg.end_on_newline {
+                            docs.push(Doc::Newline);
+                        } else {
+                            docs.push(Doc::Space);
+                        }
+                    }
+                    if matches!(inner.kind(), "seq_block" | "conditional_statement") {
+                        docs.push(fmt_body(f, *child, 0));
+                    } else {
                     // 单语句：检查其后的行尾注释
                     let trailing_comment = items.get(i + 1).filter(|n| {
                         n.is_named()
@@ -249,6 +255,7 @@ pub(crate) fn fmt_conditional(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                     } else {
                         docs.push(fmt_body(f, *child, 0));
                     }
+                }
                 }
                 is_else = false;
                 cond_after_else = false;

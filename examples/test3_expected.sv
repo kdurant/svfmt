@@ -123,4 +123,83 @@ xpm_fifo_axis_Ex01
     .m_axis_tlast        (  m_axis_tlast      )
 );
 
+always @(posedge clk)
+begin
+    if(rst)
+    begin
+        bus_command <= 0;
+        bus_data    <= 0;
+        bus_addr    <= 0;
+    end
+    else
+    begin
+        if(cs[IDLE] & ns[ERASE_LOCK_SETUP])
+        begin
+            bus_command <= `BASIC_CMD_UNLOCK;
+            bus_data    <= {8'h00, 8'h60};
+            bus_addr    <= flash_addr;
+        end
+        else if(cs[ERASE_LOCK_SETUP] & ns[ERASE_UNLOCK])
+        begin
+            bus_command <= `BASIC_CMD_UNLOCK;
+            bus_data    <= {8'h00, 8'hd0};
+            bus_addr    <= flash_addr;
+        end
+        else if(cs[ERASE_UNLOCK] & ns[ERASE_SEND])
+        begin
+            bus_command <= `BASIC_CMD_UNLOCK;
+            bus_data    <= {8'h00, 8'h20};
+            bus_addr    <= flash_addr;
+        end
+        else if(cs[ERASE_SEND] & ns[ERASE_CONFIRM])
+        begin
+            bus_command <= `BASIC_CMD_UNLOCK;
+            bus_data    <= {8'h00, 8'hd0};
+            bus_addr    <= flash_addr;
+        end
+        else if(cs[IDLE] & ns[PROG_LOCK_SETUP])
+        begin
+            bus_command <= `BASIC_CMD_UNLOCK;
+            bus_data    <= {8'h00, 8'h60};
+            bus_addr    <= flash_addr;
+        end
+        else if(cs[PROG_LOCK_SETUP] & ns[PROG_UNLOCK])
+        begin
+            bus_command <= `BASIC_CMD_UNLOCK;
+            bus_data    <= {8'h00, 8'hd0};
+            bus_addr    <= flash_addr;
+        end
+        else if(cs[PROG_UNLOCK] & ns[BUF_PROG_SEND])
+        begin
+            bus_command <= `BASIC_CMD_WRITE;
+            bus_data    <= {8'h00, 8'he8};
+            bus_addr    <= flash_addr;
+        end
+        else if(cs[BUF_PROG_SEND] & ns[BUF_PROG_NUMBER])
+        begin
+            bus_command <= `BASIC_CMD_WRITE;
+            bus_data    <= FRAME_LEN[15:00];
+            bus_addr    <= flash_addr;
+        end
+        else if(cs[BUF_PROG_NUMBER] & ns[BUF_PROG_DATA])
+        begin
+            bus_command <= `BASIC_CMD_WRITE;
+            bus_data    <= s_axis_tdata;
+            bus_addr    <= flash_addr + write_cnt;
+        end
+        else if(cs[BUF_PROG_COUNT] & ns[BUF_PROG_DATA])
+        begin
+            bus_command <= `BASIC_CMD_WRITE;
+            bus_data    <= s_axis_tdata;
+            bus_addr    <= flash_addr + write_cnt;
+        end
+        else if(cs[BUF_PROG_COUNT] & ns[BUF_PROG_CONFIRM])
+        begin
+            bus_command <= `BASIC_CMD_WRITE;
+            bus_data    <= {8'h00, 8'hD0};
+            bus_addr    <= flash_addr;
+        end
+    end
+end
+
 endmodule
