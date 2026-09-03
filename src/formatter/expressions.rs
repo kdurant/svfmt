@@ -819,8 +819,8 @@ fn fmt_call(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
     for child in node.children_iter() {
         if child.is_named() {
             let d = fmt_expr(f, child, ctx);
-            if let Some(p) = prev {
-                if let Some(tok) = first_token_of(child) {
+            if let Some(p) = prev
+                && let Some(tok) = first_token_of(child) {
                     let ws = f.ws(p.byte_range.1, tok.byte_range.0);
                     // 注释后或 `(` 后换行：保留（多行调用）
                     if has_newline(ws) && (p.is_comment || p.kind == "(") {
@@ -830,7 +830,6 @@ fn fmt_call(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
                         apply_sep(f, &mut docs, &p, &tok, sep);
                     }
                 }
-            }
             docs.push(d);
             if let Some(t) = last_token_of(child) {
                 prev = Some(t);

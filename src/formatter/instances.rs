@@ -252,8 +252,9 @@ fn aligned_connections(
     // 单行条件：newline_per_instance_port=false 时强制单行；
     // 否则按 wrap_instance_ports 阈值（连接数不超过阈值时单行）
     let wrap = f.cfg.wrap_instance_ports as usize;
-    let single_line =
-        !f.cfg.module.newline_per_instance_port || (wrap >= 1 && parsed.len() <= wrap);
+    let has_macro = conns.iter().any(|c| c.kind() == "text_macro_usage");
+    let single_line = !f.cfg.module.newline_per_instance_port
+        || (wrap >= 1 && parsed.len() <= wrap && !has_macro);
     if f.svdbg() {
         eprintln!(
             "[aligned2] name_max={} value_max={} extra={}",
@@ -261,16 +262,30 @@ fn aligned_connections(
         );
     }
     let mut docs: Vec<Doc> = Vec::new();
-    let mut rendered: Vec<(String, usize)> = Vec::new(); // (行文本, conns 索引)
+    let mut rendered: Vec<(String, usize, bool, usize, usize)> =
+        Vec::new(); // (行文本, conns 索引, 预处理指令行, 起始, 结束)
     let mut pi = 0usize;
     for (ci, c) in conns.iter().enumerate() {
         if c.is_named() && c.kind().ends_with("comment") {
             // 行尾注释：追加到前一个连接行
-            if let Some((line, _)) = rendered.last_mut() {
+            if let Some((line, _, _, _, _)) = rendered.last_mut() {
                 line.push_str("  ");
                 line.push_str(c.text());
             }
             continue;
+        }
+        let r = c.byte_range();
+        let dir: Option<CstNode<'_>> = if c.kind() == "text_macro_usage" {
+            Some(*c)
+        } else {
+            c.children()
+                .into_iter()
+                .find(|k| k.kind() == "conditional_compilation_directive")
+        };
+        if let Some(d) = dir {
+            // 预处理指令（`ifdef/else/endif）：顶格独立行（不参与对齐，不消耗 parsed）
+            let dr = d.byte_range();
+            rendered.push((d.text().trim_end().to_string(), ci, true, dr.start, dr.end));
         }
         if pi >= parsed.len() {
             break;
@@ -300,7 +315,17 @@ fn aligned_connections(
         if has_comma {
             line.push(',');
         }
-        rendered.push((line, ci));
+        // 连接行起点：指令存在时取指令后下一个子节点（连接实际开始），否则节点起点
+        let dir_start = if let Some(d) = dir {
+            c.children()
+                .into_iter()
+                .find(|k| k.byte_range().start > d.byte_range().end)
+                .map(|k| k.byte_range().start)
+                .unwrap_or(d.byte_range().end)
+        } else {
+            r.start
+        };
+        rendered.push((line, ci, false, dir_start, r.end));
         pi += 1;
     }
     // 超宽回退：仅基于连接本体判断（不包含行尾注释），避免注释误触发回退。
@@ -334,13 +359,13 @@ fn aligned_connections(
         return wrapped_connections(f, &parsed, conns, name_max, value_max, inner);
     }
     // 输出行，行间换行/空行（单行模式用空格分隔）
-    let mut prev_ci: Option<usize> = None;
-    for (idx, (line, ci)) in rendered.iter().enumerate() {
-        if let Some(pci) = prev_ci {
+    let mut prev_range: Option<(usize, usize)> = None;
+    for (line, ci, is_macro, start, end) in &rendered {
+        if let Some((_, pe)) = prev_range {
             if single_line {
                 docs.push(Doc::Space);
             } else {
-                let ws = f.ws(conns[pci].byte_range().end, conns[*ci].byte_range().start);
+                let ws = f.ws(pe, *start);
                 let blanks = count_blank_lines(ws);
                 if blanks > 0 {
                     docs.push(Doc::BlankLines(blanks));
@@ -349,9 +374,15 @@ fn aligned_connections(
                 }
             }
         }
-        let _ = idx;
-        docs.push(Doc::text(line.clone()));
-        prev_ci = Some(*ci);
+        if *is_macro {
+            // 预处理指令顶格：Dedent → 行 → Indent
+            docs.push(Doc::Dedent);
+            docs.push(Doc::text(line.clone()));
+            docs.push(Doc::Indent);
+        } else {
+            docs.push(Doc::text(line.clone()));
+        }
+        prev_range = Some((*ci, *end));
     }
     Doc::concat(docs)
 }
@@ -534,14 +565,13 @@ fn fill_last_word_width(doc: &Doc, tab_width: usize) -> usize {
 }
 
 /// 把行尾注释追加到上一个连接 Doc 的末尾。
-fn append_conn_comment(docs: &mut Vec<Doc>, comment: &str) {
-    if let Some(last) = docs.last_mut() {
-        if let Doc::Group(children) = last {
-            if let Some(Doc::Text(s)) = children.last_mut() {
-                s.push_str("  ");
-                s.push_str(comment);
-            }
-        }
+fn append_conn_comment(docs: &mut [Doc], comment: &str) {
+    if let Some(last) = docs.last_mut()
+        && let Doc::Group(children) = last
+        && let Some(Doc::Text(s)) = children.last_mut()
+    {
+        s.push_str("  ");
+        s.push_str(comment);
     }
 }
 

@@ -202,4 +202,20 @@ begin
     end
 end
 
+dac_top dac5328_Ex01
+(
+    .clk                    (  clk_125m                         ),
+    .rst                    (  rst_125m                         ),
+
+    .source1                (  user_para.da5328_set             ),
+
+`ifdef RADAR_OCEAN
+    .source2                (  da_temp_set                      ),
+`else
+    .source2                (  0                                ),
+`endif
+
+    .ad5328                 (  ad5328                           )
+);
+
 endmodule

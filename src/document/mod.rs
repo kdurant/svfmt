@@ -247,8 +247,8 @@ impl Renderer<'_> {
                 j += 1;
             }
             // 输出 [i, j) 之间的内容（不含断行点）
-            for k in i..j {
-                self.emit(&children[k]);
+            for child in &children[i..j] {
+                self.emit(child);
             }
             if j >= children.len() {
                 break;
@@ -261,7 +261,8 @@ impl Renderer<'_> {
                     trial.column += 1;
                 }
                 let mut k = j + 1;
-                while k < children.len() && !matches!(children[k], Doc::SoftLine | Doc::SoftLineNil)
+                while k < children.len()
+                    && !matches!(children[k], Doc::SoftLine | Doc::SoftLineNil)
                 {
                     trial.emit(&children[k]);
                     k += 1;
