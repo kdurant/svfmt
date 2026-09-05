@@ -409,4 +409,19 @@ mod tests {
         let twice = fmt(&once);
         assert_eq!(once, twice);
     }
+
+    #[test]
+    fn module_body_import_is_preserved() {
+        // import 在模块体内被解析为 data_declaration(package_import_declaration)，
+        // 不应被当作可对齐声明丢弃（回归：曾输出为孤立的 `;`）。
+        let src = "module tb;\n\n  import sata_pkg::*;\n\n  int errors = 0;\nendmodule\n";
+        let out = fmt(src);
+        assert!(
+            out.contains("import sata_pkg::*;"),
+            "import 被丢弃: {out:?}"
+        );
+        assert!(!out.contains(" ;"), "import 被格式化为孤立分号: {out:?}");
+        // 幂等
+        assert_eq!(out, fmt(&out));
+    }
 }

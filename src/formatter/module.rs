@@ -189,6 +189,14 @@ fn is_alignable(node: CstNode<'_>) -> bool {
         {
             return false;
         }
+        // import（package_import_declaration）等非声明内容不参与对齐（原样输出）
+        if node
+            .named_children()
+            .iter()
+            .any(|c| c.kind() == "package_import_declaration")
+        {
+            return false;
+        }
         return true;
     }
     if node.kind() == "local_parameter_declaration" || node.kind() == "parameter_declaration" {
