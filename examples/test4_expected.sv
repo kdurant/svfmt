@@ -11,14 +11,14 @@ task automatic check_code(input string name, input logic [9:0] exp, input logic 
     if (exp !== got) begin errors++;
       $display("FAIL %-28s exp=%03X got=%03X", name, exp, got);
     end else $display("PASS %-28s = %03X", name, got);
-  endtask
+endtask
 
 task automatic check_rdeq(input string name, input logic exp, input logic got);
     checks++;
     if (exp !== got) begin errors++;
       $display("FAIL %-28s exp=%0d got=%0d", name, exp, got);
     end
-  endtask
+endtask
 
 initial
 begin

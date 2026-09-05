@@ -875,3 +875,35 @@ pub fn has_colon_label(children: &[CstNode<'_>]) -> bool {
         .windows(2)
         .any(|w| w[0].kind() == ":" && w[1].kind() == "simple_identifier")
 }
+
+/// task_declaration / function_declaration：task/function 头与 body 原文输出，
+/// 但 endtask/endfunction 与 task/function 对齐（当前缩进级别）。
+///
+/// 此前这些节点走 `fmt_default` 输出整段原文，body 内部行保留源码缩进（符合
+/// 预期），但 endtask/endfunction 也保留了源码缩进，导致与 task/function 不对齐
+/// （如模块内 task 缩进 2 空格时 endtask 也缩进 2 空格，期望与 task 同列）。
+/// 这里把 endtask/endfunction 单独输出在当前缩进级别，与 task/function 对齐。
+pub fn fmt_task_or_function_declaration(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
+    let (body_kind, end_kind) = if node.kind() == "task_declaration" {
+        ("task_body_declaration", "endtask")
+    } else {
+        ("function_body_declaration", "endfunction")
+    };
+    // endtask/endfunction 是 body_declaration 的直接子节点
+    let end = node
+        .children()
+        .into_iter()
+        .find(|c| c.kind() == body_kind)
+        .and_then(|b| b.children().into_iter().find(|c| c.kind() == end_kind));
+    if let Some(e) = end {
+        // 输出 endtask/endfunction 之前的原文（头 + body，保留内部缩进），
+        // 末尾空白（endtask 前的源码缩进）由 trim_end 去掉
+        let text = node.text()[..(e.byte_range().start - node.byte_range().start)].trim_end();
+        let mut docs = vec![Doc::text(text.to_string())];
+        docs.push(Doc::Newline);
+        docs.push(Doc::text(end_kind));
+        Doc::concat(docs)
+    } else {
+        f.raw(node)
+    }
+}

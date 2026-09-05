@@ -206,6 +206,9 @@ impl<'a> Formatter<'a> {
             "always_construct" | "initial_construct" | "final_construct" => {
                 statements::fmt_procedural_construct(self, node)
             }
+            "task_declaration" | "function_declaration" => {
+                statements::fmt_task_or_function_declaration(self, node)
+            }
             "seq_block" => statements::fmt_seq_block(self, node),
             "conditional_statement" => statements::fmt_conditional(self, node),
             "case_statement" => statements::fmt_case_statement(self, node),
