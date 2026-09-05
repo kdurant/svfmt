@@ -18,7 +18,11 @@ pub fn unwrap_statement<'a>(_f: &Formatter<'a>, node: CstNode<'a>) -> CstNode<'a
     let mut cur = node;
     loop {
         match cur.kind() {
-            "statement_or_null" | "statement" | "statement_item" => {
+            "statement_or_null"
+            | "statement"
+            | "statement_item"
+            | "function_statement_or_null"
+            | "function_statement" => {
                 if let Some(c) = cur.named_child(0) {
                     cur = c;
                     continue;
@@ -346,6 +350,105 @@ fn is_delay_stmt(f: &Formatter<'_>, node: CstNode<'_>) -> bool {
         return false;
     }
     inner.children().iter().any(|c| c.kind() == "delay_control")
+}
+
+/// task/function body：连续赋值对齐，其余语句保留原文（含源码缩进）。
+///
+/// 与 `fmt_seq_block_body` 不同：非赋值语句（if/for/自增等）不重新排版，
+/// 而是保留源码原文与缩进（首行补源码起始列，内部行保留源码缩进），
+/// 仅对连续赋值做 `=` 对齐。这样 task/function 体内的 if 等结构不会被
+/// 拆成 begin/else 换行风格，保持用户手写布局。
+fn fmt_task_function_body(f: &Formatter<'_>, body_nodes: &[CstNode<'_>]) -> Vec<Doc> {
+    let mut docs: Vec<Doc> = Vec::new();
+    let mut seg: Vec<CstNode<'_>> = Vec::new();
+    let mut prev_end: Option<usize> = None;
+    let mut first = true;
+
+    let flush = |f: &Formatter<'_>, docs: &mut Vec<Doc>, seg: &mut Vec<CstNode<'_>>| {
+        if seg.is_empty() {
+            return;
+        }
+        // 确保赋值组前有换行
+        if !docs.is_empty() && !matches!(docs.last(), Some(Doc::Newline) | Some(Doc::BlankLines(_)))
+        {
+            docs.push(Doc::Newline);
+        }
+        docs.push(Doc::Indent);
+        emit_assign_segment(f, seg, docs, true);
+        docs.push(Doc::Dedent);
+        seg.clear();
+    };
+
+    for node in body_nodes {
+        let blank_before = prev_end
+            .map(|pe| crate::formatter::count_blank_lines(f.ws(pe, node.byte_range().start)) > 0)
+            .unwrap_or(false);
+        let inner = unwrap_statement(f, *node);
+        let is_assign = assignment_columns(inner).is_some();
+        let is_comment = node.is_named() && node.kind().ends_with("comment");
+        if blank_before {
+            let blanks = prev_end
+                .map(|pe| crate::formatter::count_blank_lines(f.ws(pe, node.byte_range().start)))
+                .unwrap_or(0);
+            flush(f, &mut docs, &mut seg);
+            if !docs.is_empty() && blanks > 0 {
+                docs.push(Doc::BlankLines(blanks));
+            }
+        }
+        if is_assign {
+            // 前一个元素若不是赋值（且不是注释），断组
+            if !seg.is_empty() && !blank_before {
+                let prev_last = seg
+                    .iter()
+                    .rev()
+                    .find(|n| !(n.is_named() && n.kind().ends_with("comment")));
+                if let Some(pl) = prev_last
+                    && assignment_columns(unwrap_statement(f, *pl)).is_none()
+                {
+                    flush(f, &mut docs, &mut seg);
+                }
+            }
+            seg.push(*node);
+        } else if is_comment {
+            if !seg.is_empty() && !blank_before {
+                seg.push(*node);
+            } else {
+                flush(f, &mut docs, &mut seg);
+                if !first {
+                    docs.push(Doc::Newline);
+                }
+                // 独立注释：经 fmt 分派（块注释会规整内部缩进）
+                docs.push(f.fmt(*node));
+            }
+        } else {
+            flush(f, &mut docs, &mut seg);
+            if !first && !blank_before {
+                let ws = f.ws(prev_end.unwrap(), node.byte_range().start);
+                if has_newline(ws) {
+                    let blanks = crate::formatter::count_blank_lines(ws);
+                    if blanks > 0 {
+                        docs.push(Doc::BlankLines(blanks));
+                    } else {
+                        docs.push(Doc::Newline);
+                    }
+                } else {
+                    docs.push(Doc::Space);
+                }
+            }
+            // 保留原文：首行补源码起始列缩进，内部行保留源码缩进
+            let col = node.start_position().column;
+            let mut text = String::new();
+            for _ in 0..col {
+                text.push(' ');
+            }
+            text.push_str(node.text());
+            docs.push(Doc::text(text));
+        }
+        prev_end = Some(node.byte_range().end);
+        first = false;
+    }
+    flush(f, &mut docs, &mut seg);
+    docs
 }
 
 /// 输出赋值对齐组。
@@ -876,34 +979,45 @@ pub fn has_colon_label(children: &[CstNode<'_>]) -> bool {
         .any(|w| w[0].kind() == ":" && w[1].kind() == "simple_identifier")
 }
 
-/// task_declaration / function_declaration：task/function 头与 body 原文输出，
-/// 但 endtask/endfunction 与 task/function 对齐（当前缩进级别）。
+/// task_declaration / function_declaration：task/function 头原文输出，body 中
+/// 连续赋值对齐、其余语句保留原文，endtask/endfunction 与 task/function 对齐
+/// （当前缩进级别）。
 ///
-/// 此前这些节点走 `fmt_default` 输出整段原文，body 内部行保留源码缩进（符合
-/// 预期），但 endtask/endfunction 也保留了源码缩进，导致与 task/function 不对齐
-/// （如模块内 task 缩进 2 空格时 endtask 也缩进 2 空格，期望与 task 同列）。
-/// 这里把 endtask/endfunction 单独输出在当前缩进级别，与 task/function 对齐。
+/// 此前这些节点走 `fmt_default` 输出整段原文，body 内部行保留源码缩进（含未对齐
+/// 的赋值），且 endtask/endfunction 也保留了源码缩进，导致与 task/function 不对齐。
+/// 这里 body 经 `fmt_task_function_body`（赋值对齐、非赋值语句保留原文），
+/// endtask/endfunction 单独输出在当前缩进级别，与 task/function 对齐。
 pub fn fmt_task_or_function_declaration(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
-    let (body_kind, end_kind) = if node.kind() == "task_declaration" {
-        ("task_body_declaration", "endtask")
+    let (body_kind, stmt_kind, end_kind) = if node.kind() == "task_declaration" {
+        ("task_body_declaration", "statement_or_null", "endtask")
     } else {
-        ("function_body_declaration", "endfunction")
+        ("function_body_declaration", "function_statement_or_null", "endfunction")
     };
-    // endtask/endfunction 是 body_declaration 的直接子节点
-    let end = node
-        .children()
-        .into_iter()
-        .find(|c| c.kind() == body_kind)
-        .and_then(|b| b.children().into_iter().find(|c| c.kind() == end_kind));
-    if let Some(e) = end {
-        // 输出 endtask/endfunction 之前的原文（头 + body，保留内部缩进），
-        // 末尾空白（endtask 前的源码缩进）由 trim_end 去掉
-        let text = node.text()[..(e.byte_range().start - node.byte_range().start)].trim_end();
-        let mut docs = vec![Doc::text(text.to_string())];
-        docs.push(Doc::Newline);
-        docs.push(Doc::text(end_kind));
-        Doc::concat(docs)
-    } else {
-        f.raw(node)
+    let body = node.children().into_iter().find(|c| c.kind() == body_kind);
+    if let Some(b) = body {
+        let b_children: Vec<CstNode<'_>> = b.children();
+        let stmts: Vec<CstNode<'_>> = b_children
+            .iter()
+            .filter(|c| c.kind() == stmt_kind)
+            .copied()
+            .collect();
+        let end = b_children.iter().find(|c| c.kind() == end_kind).copied();
+        if let (Some(first), Some(_e)) = (stmts.first(), end) {
+            // 头：从节点开始到第一个 body 语句之前（原文，保留多行端口列表）
+            let header_raw = &node.text()[..(first.byte_range().start - node.byte_range().start)];
+            let header = header_raw.trim_end();
+            // 头与第一个语句之间的空行
+            let blanks = crate::formatter::count_blank_lines(&header_raw[header.len()..]);
+            let mut docs = vec![Doc::text(header.to_string())];
+            docs.push(Doc::Newline);
+            if blanks > 0 {
+                docs.push(Doc::BlankLines(blanks));
+            }
+            docs.extend(fmt_task_function_body(f, &stmts));
+            docs.push(Doc::Newline);
+            docs.push(Doc::text(end_kind));
+            return Doc::concat(docs);
+        }
     }
+    f.raw(node)
 }
