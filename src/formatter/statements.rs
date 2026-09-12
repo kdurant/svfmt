@@ -6,7 +6,7 @@ mod control;
 use crate::document::Doc;
 use crate::formatter::Formatter;
 use crate::formatter::expressions::fmt_expr;
-use crate::formatter::tokens::has_newline;
+use crate::formatter::tokens::{display_width, has_newline};
 use crate::parser::CstNode;
 
 // 子模块对外接口 re-export（dispatch 与跨模块引用统一经此路径）
@@ -214,13 +214,14 @@ pub fn fmt_seq_block(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     Doc::concat(docs)
 }
 
-/// 是否赋值语句（unwrap 后为 blocking/nonblocking/operator assignment）。
+/// 是否可参与 `=` 对齐的赋值语句。
+///
+/// 判据必须与 [`assignment_columns`] 完全一致：只有能提取出单条 `lhs op rhs` 的
+/// 语句才可进入对齐段。否则 `emit_assign_segment` 取不出列，语句会被整条丢弃
+/// ——例如 `a++;`（`inc_or_dec_expression`，无 rhs）曾被静默删除；
+/// 含 ERROR 的赋值（`a = 1, b = 2;`）则会丢 token。
 fn is_assignment_stmt(f: &Formatter<'_>, node: CstNode<'_>) -> bool {
-    let inner = unwrap_statement(f, node);
-    matches!(
-        inner.kind(),
-        "blocking_assignment" | "nonblocking_assignment" | "operator_assignment"
-    )
+    assignment_columns(unwrap_statement(f, node)).is_some()
 }
 
 /// seq_block 内语句：连续赋值对齐。
@@ -460,6 +461,7 @@ fn emit_assign_segment(
     trailing_newline: bool,
 ) {
     // 列：lhs、op、rhs
+    let tw = f.cfg.tab_width as usize;
     let mut rows: Vec<(String, String, CstNode<'_>)> = Vec::new();
     let mut max_lhs = 0usize;
     for node in seg {
@@ -468,14 +470,15 @@ fn emit_assign_segment(
         }
         let inner = unwrap_statement(f, *node);
         if let Some((lhs, op, rhs)) = assignment_columns(inner) {
-            let w = lhs.chars().count();
+            let w = display_width(&lhs, tw);
             if w > max_lhs {
                 max_lhs = w;
             }
             rows.push((lhs, op, rhs));
         } else if f.svdbg() {
+            // 正常不会出现：进段的语句都满足 assignment_columns().is_some()
             eprintln!(
-                "[assign-seg] DROPPED inner_kind={} text={:?}",
+                "[assign-seg] non-assign in segment: inner_kind={} text={:?}",
                 inner.kind(),
                 inner.text()
             );
@@ -487,7 +490,11 @@ fn emit_assign_segment(
     let block_max_semi = rows
         .iter()
         .map(|(lhs, op, rhs)| {
-            lhs.chars().count().max(op_col) + op.chars().count() + 1 + render_doc_width(f, *rhs) + 1
+            display_width(lhs, tw).max(op_col)
+                + display_width(op, tw)
+                + 1
+                + render_doc_width(f, *rhs)
+                + 1
         })
         .max()
         .unwrap_or(0);
@@ -541,7 +548,7 @@ fn emit_assign_segment(
                 let mut line = String::new();
                 let mut cell = lhs.clone();
                 if f.cfg.align_assignments {
-                    while cell.chars().count() < op_col {
+                    while display_width(&cell, tw) < op_col {
                         cell.push(' ');
                     }
                 } else {
@@ -557,6 +564,17 @@ fn emit_assign_segment(
                 line.push_str(&rhs_text);
                 line.push(';');
                 current = Some(line);
+            } else {
+                // 取不出 `lhs op rhs`（分组判据与提取不一致的兜底）：原样输出，
+                // 绝不能静默丢弃语句。
+                if f.svdbg() {
+                    eprintln!(
+                        "[assign-seg] fallback raw inner_kind={} text={:?}",
+                        inner.kind(),
+                        inner.text()
+                    );
+                }
+                lines.push(render_doc(f, f.fmt(*node)));
             }
         }
     }
@@ -573,7 +591,7 @@ fn emit_assign_segment(
 
 fn render_doc_width(f: &Formatter<'_>, node: CstNode<'_>) -> usize {
     let doc = fmt_expr(f, node, &crate::formatter::expressions::ExprCtx::default());
-    render_doc(f, doc).chars().count()
+    display_width(&render_doc(f, doc), f.cfg.tab_width as usize)
 }
 
 /// 把 Doc 渲染为文本（用于 rhs，强制单行不受 column_limit 影响）。
@@ -594,7 +612,13 @@ fn prev_node_end(seg: &[CstNode<'_>], node: CstNode<'_>) -> Option<usize> {
 }
 
 /// 提取赋值的 lhs / op / rhs 节点。
+///
+/// 含语法错误（ERROR）的赋值返回 `None`：ERROR 恢复出的节点结构不可靠，
+/// 按此提取会丢失 token（如 `a = 1, b = 2;` 的 `a`）。调用方据此回退到原文输出。
 fn assignment_columns(node: CstNode<'_>) -> Option<(String, String, CstNode<'_>)> {
+    if node.subtree_has_error() {
+        return None;
+    }
     // blocking_assignment 内嵌 operator_assignment
     let mut node = node;
     if node.kind() == "blocking_assignment" {
@@ -847,7 +871,9 @@ fn fmt_generate_block(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
 
     for child in children {
         let is_kw = matches!(child.kind(), "begin" | "end");
-        let is_assign = child.kind() == "continuous_assign";
+        // 多赋值 / 含 ERROR 的赋值不参与对齐段（对齐只保留一条赋值，会丢语义）
+        let is_assign = child.kind() == "continuous_assign"
+            && crate::formatter::module::continuous_assign_alignable(child);
 
         let (blank_before, has_nl, blanks) = if let Some(pe) = prev_end {
             let ws = f.ws(pe, child.byte_range().start);
@@ -991,7 +1017,11 @@ pub fn fmt_task_or_function_declaration(f: &Formatter<'_>, node: CstNode<'_>) ->
     let (body_kind, stmt_kind, end_kind) = if node.kind() == "task_declaration" {
         ("task_body_declaration", "statement_or_null", "endtask")
     } else {
-        ("function_body_declaration", "function_statement_or_null", "endfunction")
+        (
+            "function_body_declaration",
+            "function_statement_or_null",
+            "endfunction",
+        )
     };
     let body = node.children().into_iter().find(|c| c.kind() == body_kind);
     if let Some(b) = body {

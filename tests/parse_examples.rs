@@ -31,6 +31,10 @@ fn all_example_files_parse_without_error() {
     for entry in std::fs::read_dir(&examples).unwrap() {
         let entry = entry.unwrap();
         let path = entry.path();
+        // 跳过目录（examples/ 下可能存在子目录，read_to_string 会失败）
+        if !path.is_file() {
+            continue;
+        }
         if path.extension().is_some_and(|e| e != "sv") {
             continue;
         }

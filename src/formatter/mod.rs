@@ -9,12 +9,13 @@ pub mod declarations;
 pub mod expressions;
 pub mod instances;
 pub mod module;
+pub mod preprocessor;
 pub mod statements;
 pub mod tokens;
 
 use crate::config::FormatterConfig;
 use crate::document::{Doc, RenderOptions, render};
-use crate::parser::{CstNode, SvParser, collect_error_nodes};
+use crate::parser::{CstNode, SvParser, collect_problem_nodes};
 
 /// 格式化器：持有配置与源码。
 pub struct Formatter<'a> {
@@ -46,17 +47,18 @@ impl<'a> Formatter<'a> {
         Ok(Self::format_source_checked(src, cfg)?.0)
     }
 
-    /// 解析并格式化源码，返回输出与语法错误节点数。
+    /// 解析并格式化源码，返回输出与语法问题节点数（`ERROR` + `MISSING`）。
     ///
     /// 语法错误不会使格式化失败（tree-sitter 通过 ERROR/MISSING 节点恢复），
-    /// 但调用方可用错误数决定是否告警或以非零状态退出（`--fail-on-parse-error`）。
+    /// 但调用方可用问题数决定是否告警或以非零状态退出（`--fail-on-parse-error`）。
+    /// 计数范围与 `CstTree::has_error()` 保持一致。
     pub fn format_source_checked(
         src: &str,
         cfg: &FormatterConfig,
     ) -> Result<(String, usize), FormatterError> {
         let mut parser = SvParser::new()?;
         let tree = parser.parse(src)?;
-        let error_count = collect_error_nodes(tree.root_node()).len();
+        let error_count = collect_problem_nodes(tree.root_node()).len();
         let formatter = Formatter::new(cfg, src);
         let doc = formatter.fmt(tree.root_node());
         let options = RenderOptions::from(cfg);
@@ -164,25 +166,6 @@ impl<'a> Formatter<'a> {
         }
     }
 
-    /// 输出原文空行（保留空行内的空格，TrimTrailingWhitespace=false）。
-    pub fn blank_lines_doc(&self, ws: &str) -> Doc {
-        let parts: Vec<&str> = ws.split('\n').collect();
-        if parts.len() <= 1 {
-            return Doc::Newline;
-        }
-        let mut out = String::new();
-        for part in &parts[1..parts.len().saturating_sub(1)] {
-            out.push('\n');
-            out.push_str(part);
-        }
-        out.push('\n');
-        if out == "\n" {
-            Doc::Newline
-        } else {
-            Doc::text(out)
-        }
-    }
-
     // ---------- dispatch ----------
 
     pub fn fmt(&self, node: CstNode<'_>) -> Doc {
@@ -259,15 +242,11 @@ impl<'a> Formatter<'a> {
             "subroutine_call_statement" | "subroutine_call" | "system_tf_call" | "tf_call" => {
                 expressions::fmt_expr(self, node, &expressions::ExprCtx::default())
             }
-            _ if node.kind().ends_with("comment") => self.fmt_comment(node),
+            _ if node.kind().ends_with("comment") => comments::fmt_comment(self, node),
             _ if node.kind().ends_with("compiler_directive")
                 || node.kind().ends_with("directive") =>
             {
-                if self.cfg.directives_at_line_start {
-                    Doc::concat(vec![Doc::Col0, self.raw(node)])
-                } else {
-                    self.raw(node)
-                }
+                preprocessor::fmt_directive(self, node)
             }
             _ if expressions::is_value_kind(node.kind()) => expressions::dispatch_expr(self, node),
             _ => self.fmt_default(node),
@@ -411,6 +390,69 @@ mod tests {
         let once = fmt(src);
         let twice = fmt(&once);
         assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn wildcard_port_connection_is_preserved() {
+        // `.*` 通配端口连接：曾因被判为"无名连接"而整条过滤，丢失连接语义，
+        // 并导致 ram_sdp.sv 二次格式化结构漂移（不幂等）。
+        let src = "module t;\nfoo u(\n.*\n);\nendmodule\n";
+        let out = fmt(src);
+        assert!(out.contains(".*"), "通配端口连接被丢弃: {out:?}");
+        assert_eq!(out, fmt(&out), "通配端口连接应幂等");
+    }
+
+    #[test]
+    fn multi_assignment_and_inc_dec_statements_are_preserved() {
+        // 多赋值 assign 曾只保留最后一条；inc/dec 语句（无 rhs）曾在对齐段被整条丢弃。
+        let src =
+            "module t;\nassign a = 1, b = 2;\ninitial begin\n  c++;\n  d = 3;\nend\nendmodule\n";
+        let out = fmt(src);
+        assert!(
+            out.contains("assign a = 1, b = 2;"),
+            "多赋值 assign 丢语句: {out:?}"
+        );
+        assert!(out.contains("c++;"), "inc/dec 语句被丢弃: {out:?}");
+        assert_eq!(out, fmt(&out), "应幂等");
+    }
+
+    #[test]
+    fn multi_param_port_list_is_preserved() {
+        // `parameter A = 1, B = 2` 曾只保留第一条赋值。
+        let src = "module m #( parameter A = 1, B = 2 )\n( input logic clk );\nendmodule\n";
+        let out = fmt(src);
+        assert!(
+            out.contains("parameter A = 1, B = 2"),
+            "多参数赋值被丢弃: {out:?}"
+        );
+        assert_eq!(out, fmt(&out), "应幂等");
+    }
+
+    #[test]
+    fn trailing_comments_align_by_display_width_with_cjk() {
+        // 列宽必须按显示宽度（CJK=2）计算：含中文的行与 ASCII 行的行尾注释应落在同一列。
+        let src = "module t;\ninitial begin\n  a = \"中文中文\"; // 中\n  bbbbb = \"aaaa\"; // x\nend\nendmodule\n";
+        let out = fmt(src);
+        let cols: Vec<usize> = out
+            .lines()
+            .filter(|l| l.contains("//"))
+            .map(|l| {
+                let i = l.find("//").expect("应能定位注释");
+                crate::document::display_width(&l[..i], 4)
+            })
+            .collect();
+        assert_eq!(cols.len(), 2, "应有两行行尾注释: {out}");
+        assert_eq!(cols[0], cols[1], "行尾注释应按显示列对齐: {out}");
+    }
+
+    #[test]
+    fn macro_params_in_port_list_are_preserved() {
+        // 裸 `list_of_param_assignments`（宏参数）曾被整体忽略，模块参数静默丢失。
+        let src = "module m #(`INV(a), `INV(b))\n( input logic clk );\nendmodule\n";
+        let out = fmt(src);
+        assert!(out.contains("`INV(a),"), "宏参数被丢弃: {out:?}");
+        assert!(out.contains("`INV(b)"), "宏参数被丢弃: {out:?}");
+        assert_eq!(out, fmt(&out), "应幂等");
     }
 
     #[test]

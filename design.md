@@ -356,6 +356,8 @@ CLI 约定：
 ./target/release/svfmt examples/test3.sv -o examples/test3_tmp.sv && diff examples/test3_tmp.sv examples/test3_expected.sv
 
 ./target/release/svfmt examples/test4.sv -o examples/test4_tmp.sv && diff examples/test4_tmp.sv examples/test4_expected.sv
+
+./target/release/svfmt examples/test5.sv -o examples/test5_tmp.sv && diff examples/test5_tmp.sv examples/test5_expected.sv
 ```
 
 

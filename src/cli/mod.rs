@@ -11,7 +11,7 @@ use crate::cli::args::{Cli, Command, CstArgs};
 use crate::config::{FormatterConfig, dump_default_toml, load_from_path};
 use crate::formatter::Formatter;
 use crate::output::{PrintOptions, print_cst_to_string};
-use crate::parser::{SvParser, collect_error_nodes};
+use crate::parser::{SvParser, collect_problem_nodes};
 
 /// CLI 主入口，返回错误信息。
 pub fn run() -> Result<(), CliError> {
@@ -138,7 +138,7 @@ fn format_source(
     let (formatted, error_count) = Formatter::format_source_checked(source, cfg)?;
     if error_count > 0 {
         let where_ = file.map_or(String::new(), |f| format!("{}: ", f.display()));
-        let msg = format!("警告: {where_}解析到 {error_count} 个语法错误节点，输出可能不完整");
+        let msg = format!("警告: {where_}解析到 {error_count} 个语法错误/缺失节点，输出可能不完整");
         if cli.fail_on_parse_error {
             return Err(CliError::SyntaxErrors(error_count));
         }
@@ -198,9 +198,9 @@ fn run_cst(args: &CstArgs) -> Result<(), CliError> {
     out.flush()?;
 
     if tree.has_error() {
-        let errors = collect_error_nodes(tree.root_node());
+        let errors = collect_problem_nodes(tree.root_node());
         let msg = format!(
-            "警告: 解析到 {} 个语法错误节点（见上方 !ERROR 标记）",
+            "警告: 解析到 {} 个语法错误/缺失节点（见上方 !ERROR / !MISSING 标记）",
             errors.len()
         );
         if args.fail_on_error {
@@ -228,7 +228,7 @@ pub enum CliError {
     Write(String, io::Error),
     #[error("文件不是合法的 UTF-8 文本: {0}")]
     NotUtf8(String),
-    #[error("源码存在语法错误（{0} 个 ERROR 节点），已按要求以失败退出")]
+    #[error("源码存在语法错误（{0} 个 ERROR/MISSING 节点），已按要求以失败退出")]
     SyntaxErrors(usize),
     #[error("输出选项 -o 与多个输入文件冲突：-o 只能配合单个输入文件")]
     OutputWithMultipleFiles,

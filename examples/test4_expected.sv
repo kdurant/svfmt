@@ -75,6 +75,7 @@ begin
                 if(fail_rts < 8)
                     $display(
                         "FAIL roundtrip data byte=%02X rdstart=%0d code=%03X dec=%02X k=%0d", i, rd0, code, dec[7:0], dec[8]);
+                fail_rts++;
             end
             else
                 checks++;
@@ -91,21 +92,27 @@ begin
     // --- decode K ---
     code = u_enc.encode_8b10b(8'hBC, 1'b1, 1'b0);
     dec  = u_enc.decode_8b10b(code);
+    checks++;
     if(dec[8] != 1'b1 || dec[7 : 0] != 8'hBC)
     begin
+        errors++;
         $display("FAIL K28.5 decode got K=%0d data=%02X", dec[8], dec[7:0]);
     end
     code = u_enc.encode_8b10b(8'h7C, 1'b1, 1'b1);
     dec  = u_enc.decode_8b10b(code);
+    checks++;
     if(dec[8] != 1'b1 || dec[7 : 0] != 8'h7C)
     begin
+        errors++;
         $display("FAIL K28.3 decode got K=%0d data=%02X", dec[8], dec[7:0]);
     end
 
     // --- invalid code detection ---
     dec = u_enc.decode_8b10b(10'b0000000000);
+    checks++;
     if(dec[8] != 1'b1)
     begin
+        errors++;
         $display("FAIL invalid code not marked");
     end
 

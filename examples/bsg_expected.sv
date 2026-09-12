@@ -7,7 +7,13 @@
 
 module bsg_manycore_endpoint import bsg_manycore_pkg::*; #
 (
-    localparam packet_width_lp = `bsg_manycore_packet_width(addr_width_p,data_width_p,x_cord_width_p,y_cord_width_p)
+    `BSG_INV_PARAM(x_cord_width_p),
+    `BSG_INV_PARAM(y_cord_width_p),
+    `BSG_INV_PARAM(fifo_els_p),
+    `BSG_INV_PARAM(data_width_p),
+    `BSG_INV_PARAM(addr_width_p),
+
+    localparam packet_width_lp = `bsg_manycore_packet_width(addr_width_p, data_width_p, x_cord_width_p, y_cord_width_p), return_packet_width_lp = `bsg_manycore_return_packet_width(x_cord_width_p, y_cord_width_p, data_width_p), bsg_manycore_link_sif_width_lp = `bsg_manycore_link_sif_width(addr_width_p, data_width_p, x_cord_width_p, y_cord_width_p)
 )
 (
     input                                       clk_i,

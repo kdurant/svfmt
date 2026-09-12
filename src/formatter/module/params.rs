@@ -1,9 +1,10 @@
 //! 模块头与参数列表布局。
 
-use crate::document::Doc;
+use crate::document::{Doc, render_inline};
 use crate::formatter::Formatter;
 use crate::formatter::alignment::pad_to;
 use crate::formatter::count_blank_lines;
+use crate::formatter::expressions::fmt_default;
 use crate::formatter::tokens::{display_width, has_newline};
 use crate::parser::CstNode;
 
@@ -127,24 +128,28 @@ pub(crate) fn fmt_parameter_port_list(f: &Formatter<'_>, node: CstNode<'_>) -> D
         .filter(|c| c.kind() == "parameter_port_declaration")
         .copied()
         .collect();
-    // 收集 (prefix, name, value, 尾随逗号)
-    let mut rows: Vec<(String, String, String)> = Vec::new();
-    let mut has_comma: Vec<bool> = Vec::new();
+    // 每个 parameter_port_declaration：前缀 + 全部赋值。
+    // 单条赋值参与列对齐；多条赋值（`parameter A = 1, B = 2`）必须整条保留在同一行——
+    // 展开成多行会改变用户排版，只取第一条则会静默丢参（见 examples/test5.sv）。
+    let mut decls: Vec<(String, Vec<(String, String)>)> = Vec::new();
     for p in &params {
-        let (prefix, cols) = parameter_columns(f, *p);
-        rows.push((prefix, cols[0].clone(), cols[1].clone()));
-        let text = p.text();
-        has_comma.push(text.trim_end().ends_with(','));
+        decls.push(parameter_columns(f, *p));
     }
-    let name_max = rows
+    let has_comma: Vec<bool> = params
         .iter()
-        .map(|(_, n, _)| display_width(n, f.cfg.tab_width as usize))
+        .map(|p| p.text().trim_end().ends_with(','))
+        .collect();
+    let tw = f.cfg.tab_width as usize;
+    // 列宽统计只计入单条赋值声明，避免多赋值声明干扰既有对齐
+    let name_max = (0..decls.len())
+        .filter(|&i| decls[i].1.len() == 1)
+        .map(|i| display_width(&decls[i].1[0].0, tw))
         .max()
         .unwrap_or(0);
     // 参数 prefix 最大宽度（带宽度类型时 name 对齐到 max_prefix + 1）
-    let max_prefix_w = rows
-        .iter()
-        .map(|(p, _, _)| display_width(p, f.cfg.tab_width as usize))
+    let max_prefix_w = (0..decls.len())
+        .filter(|&i| decls[i].1.len() == 1)
+        .map(|i| display_width(&decls[i].0, tw))
         .max()
         .unwrap_or(0);
     // 生成参数行 + 注释事件
@@ -161,25 +166,31 @@ pub(crate) fn fmt_parameter_port_list(f: &Formatter<'_>, node: CstNode<'_>) -> D
                 let idx = pi;
                 pi += 1;
                 let is_last = idx + 1 == params.len();
-                // name 起始列：无类型参数（`parameter NAME`）对齐到 max_prefix+1，带类型参数从 prefix+1
-                let prefix = &rows[idx].0;
-                let is_typed = prefix.trim() != "parameter";
-                // 带宽度类型（含 `[`）或无类型参数对齐到 max_prefix+1，带类型参数从 prefix+1
-                let name_col = if prefix.contains('[') || !is_typed {
-                    max_prefix_w + 1
+                let (prefix, assigns) = &decls[idx];
+                let mut line = if assigns.len() == 1 {
+                    // name 起始列：无类型参数（`parameter NAME`）对齐到 max_prefix+1，
+                    // 带类型参数从 prefix+1；带宽度类型（含 `[`）对齐到 max_prefix+1。
+                    let is_typed = prefix.trim() != "parameter";
+                    let name_col = if prefix.contains('[') || !is_typed {
+                        max_prefix_w + 1
+                    } else {
+                        display_width(prefix, tw) + 1
+                    };
+                    fmt_parameter_port_line(
+                        f,
+                        prefix,
+                        &assigns[0].0,
+                        &assigns[0].1,
+                        name_col,
+                        name_max,
+                    )
                 } else {
-                    display_width(prefix, f.cfg.tab_width as usize) + 1
+                    // 多条赋值：整条声明按 token 间隔规则归一化为一行
+                    render_inline(&fmt_default(f, *item), f.cfg)
                 };
-                let mut line = fmt_parameter_port_line(
-                    f,
-                    prefix,
-                    &rows[idx].1,
-                    &rows[idx].2,
-                    name_col,
-                    name_max,
-                    is_last,
-                    has_comma[idx],
-                );
+                if !is_last || has_comma[idx] {
+                    line.push(',');
+                }
                 // 保留原文逗号后的行内尾随空格（仅纯空格，不含注释）
                 if !is_last {
                     let next = params[idx + 1];
@@ -192,6 +203,37 @@ pub(crate) fn fmt_parameter_port_list(f: &Formatter<'_>, node: CstNode<'_>) -> D
                     }
                 }
                 pending = Some((item.byte_range().start, item.byte_range().end, line));
+            }
+            "list_of_param_assignments" => {
+                // 裸参数赋值列表（如 `BSG_INV_PARAM(...)` 宏参数）：逐条输出。
+                // 此前该分支被整体忽略，导致这类模块参数被静默丢弃（见 examples/bsg.sv）。
+                if let Some((s, e, line)) = pending.take() {
+                    events.push((true, line, s, e));
+                }
+                let assigns: Vec<CstNode<'_>> = item
+                    .named_children()
+                    .into_iter()
+                    .filter(|c| c.kind() == "param_assignment")
+                    .collect();
+                // 列表之后若还有 `,`（后面仍有参数），最后一条也要补逗号
+                let next_is_comma = items
+                    .iter()
+                    .position(|c| c.byte_range().start == item.byte_range().start)
+                    .and_then(|k| items.get(k + 1))
+                    .is_some_and(|n| n.kind() == ",");
+                let n = assigns.len();
+                for (ai, a) in assigns.iter().enumerate() {
+                    let mut line = render_inline(&fmt_default(f, *a), f.cfg);
+                    if ai + 1 < n || next_is_comma {
+                        line.push(',');
+                    }
+                    let r = a.byte_range();
+                    if ai + 1 < n {
+                        events.push((true, line, r.start, r.end));
+                    } else {
+                        pending = Some((r.start, r.end, line));
+                    }
+                }
             }
             _ if item.is_named() && item.kind().ends_with("comment") => {
                 let cmt_start = item.byte_range().start;
@@ -250,14 +292,36 @@ pub(crate) fn fmt_parameter_port_list(f: &Formatter<'_>, node: CstNode<'_>) -> D
     Doc::concat(docs)
 }
 
-/// 参数行的列：参数名、`=`、默认值。
-pub(super) fn parameter_columns(f: &Formatter<'_>, node: CstNode<'_>) -> (String, Vec<String>) {
-    // 返回 (前缀如 "parameter" 或 "parameter int", [name, value])
+/// 参数行的列：前缀（如 `parameter`、`parameter int`）与**全部** `name = value` 赋值。
+///
+/// 返回全部赋值（而非仅第一条）是必须的：`parameter A = 1, B = 2` 只取第一条会
+/// 静默丢参（见 examples/test5.sv）。
+pub(super) fn parameter_columns(
+    f: &Formatter<'_>,
+    node: CstNode<'_>,
+) -> (String, Vec<(String, String)>) {
+    fn collect_assigns(list: CstNode<'_>, out: &mut Vec<(String, String)>) {
+        for p in list.named_children() {
+            if p.kind() != "param_assignment" {
+                continue;
+            }
+            let mut name = String::new();
+            let mut value = String::new();
+            for t in p.children() {
+                if t.kind() == "simple_identifier" {
+                    name = t.text().to_string();
+                } else if t.kind() == "constant_param_expression" {
+                    value = t.text().to_string();
+                }
+            }
+            out.push((name, value));
+        }
+    }
+
     let items: Vec<CstNode<'_>> = node.children();
     let mut keyword = String::new();
     let mut type_str = String::new();
-    let mut name = String::new();
-    let mut value = String::new();
+    let mut assigns: Vec<(String, String)> = Vec::new();
     // 处理 parameter_port_declaration -> parameter_declaration 或直接的 local/parameter 声明
     for c in items {
         match c.kind() {
@@ -265,18 +329,7 @@ pub(super) fn parameter_columns(f: &Formatter<'_>, node: CstNode<'_>) -> (String
             "data_type" | "data_type_or_implicit" | "integer_vector_type" | "integer_atom_type" => {
                 type_str = c.text().to_string();
             }
-            "list_of_param_assignments" => {
-                if let Some(p) = c.find_named_child("param_assignment") {
-                    let pc: Vec<CstNode<'_>> = p.children();
-                    for t in pc {
-                        if t.kind() == "simple_identifier" {
-                            name = t.text().to_string();
-                        } else if t.kind() == "constant_param_expression" {
-                            value = t.text().to_string();
-                        }
-                    }
-                }
-            }
+            "list_of_param_assignments" => collect_assigns(c, &mut assigns),
             "parameter_declaration" | "local_parameter_declaration" => {
                 for s in c.children() {
                     match s.kind() {
@@ -285,17 +338,7 @@ pub(super) fn parameter_columns(f: &Formatter<'_>, node: CstNode<'_>) -> (String
                         | "data_type_or_implicit"
                         | "integer_vector_type"
                         | "integer_atom_type" => type_str = s.text().to_string(),
-                        "list_of_param_assignments" => {
-                            if let Some(p) = s.find_named_child("param_assignment") {
-                                for t in p.children() {
-                                    if t.kind() == "simple_identifier" {
-                                        name = t.text().to_string();
-                                    } else if t.kind() == "constant_param_expression" {
-                                        value = t.text().to_string();
-                                    }
-                                }
-                            }
-                        }
+                        "list_of_param_assignments" => collect_assigns(s, &mut assigns),
                         _ => {}
                     }
                 }
@@ -311,12 +354,15 @@ pub(super) fn parameter_columns(f: &Formatter<'_>, node: CstNode<'_>) -> (String
         }
         prefix.push_str(&type_str);
     }
+    if assigns.is_empty() {
+        // 结构异常：保留一个空占位，避免调用方索引越界
+        assigns.push((String::new(), String::new()));
+    }
     let _ = f;
-    (prefix, vec![name, value])
+    (prefix, assigns)
 }
 
-/// 参数端口列表的每条参数行。
-#[allow(clippy::too_many_arguments)]
+/// 参数端口列表的每条参数行（不含行尾逗号，由调用方按位置补）。
 fn fmt_parameter_port_line(
     f: &Formatter<'_>,
     prefix: &str,
@@ -324,8 +370,6 @@ fn fmt_parameter_port_line(
     value: &str,
     name_col: usize,
     name_max: usize,
-    is_last: bool,
-    trailing_space: bool,
 ) -> String {
     let mut line = String::new();
     line.push_str(prefix);
@@ -342,8 +386,5 @@ fn fmt_parameter_port_line(
     line.push('=');
     line.push(' ');
     line.push_str(value);
-    if !is_last || trailing_space {
-        line.push(',');
-    }
     line
 }

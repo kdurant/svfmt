@@ -3,7 +3,7 @@
 use crate::document::Doc;
 use crate::formatter::Formatter;
 use crate::formatter::expressions::fmt_expr;
-use crate::formatter::tokens::has_newline;
+use crate::formatter::tokens::{display_width, has_newline};
 use crate::parser::CstNode;
 
 use super::control::fmt_conditional;
@@ -72,9 +72,10 @@ pub(crate) fn fmt_case_statement(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
         .filter(|c| c.kind() == "case_item")
         .copied()
         .collect();
+    let tw = f.cfg.tab_width as usize;
     let expr_widths: Vec<usize> = items_only
         .iter()
-        .map(|c| case_item_expr_text(f, *c).chars().count())
+        .map(|c| display_width(&case_item_expr_text(f, *c), tw))
         .collect();
     // 若 item 的 body 风格不一致（单行 / seq_block / conditional），则不对齐
     let body_styles: Vec<&str> = items_only
@@ -120,7 +121,12 @@ pub(crate) fn fmt_case_statement(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
         let ws = f.ws(a.byte_range().end, b.byte_range().start);
         crate::formatter::count_blank_lines(ws) == 0
     };
-    // 划分连续 run，run 内所有 item 的对齐列 = run 内最长 `;`
+    // 划分连续 run，run 内所有 item 的对齐列 = run 内最长 `;`（按显示宽度）
+    let semi_col = |t: &str| {
+        t.rfind(';')
+            .map(|i| display_width(&t[..i], tw))
+            .unwrap_or(0)
+    };
     let mut align: Vec<usize> = vec![0; n];
     let mut i = 0usize;
     while i < n {
@@ -129,10 +135,10 @@ pub(crate) fn fmt_case_statement(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
             continue;
         }
         let mut j = i;
-        let mut run_max = pre_texts[i].rfind(';').unwrap_or(0);
+        let mut run_max = semi_col(&pre_texts[i]);
         while j + 1 < n && commented[j + 1] && adjacent(j) {
             j += 1;
-            let s = pre_texts[j].rfind(';').unwrap_or(0);
+            let s = semi_col(&pre_texts[j]);
             if s > run_max {
                 run_max = s;
             }
@@ -445,6 +451,7 @@ pub(crate) fn fmt_case_item(f: &Formatter<'_>, node: CstNode<'_>, align_width: &
         }
         is_seq
     };
+    let tw = f.cfg.tab_width as usize;
     let mut expr_doc: Vec<Doc> = Vec::new();
     let mut body: Option<CstNode<'_>> = None;
     let mut body_expr = false;
@@ -454,7 +461,7 @@ pub(crate) fn fmt_case_item(f: &Formatter<'_>, node: CstNode<'_>, align_width: &
         let c = items[i];
         if c.kind() == ":" {
             // 冒号前补对齐空格（至少 1 个空格）
-            let cur = case_item_expr_text(f, node).chars().count();
+            let cur = display_width(&case_item_expr_text(f, node), tw);
             let pad_n = if body_is_seq {
                 1
             } else if f.cfg.align_case_items {

@@ -59,27 +59,6 @@ pub fn has_newline(ws: &str) -> bool {
     ws.contains('\n')
 }
 
-/// 提取两段之间的原文空白。
-pub fn whitespace_between(source: &str, start: usize, end: usize) -> &str {
-    if end <= start {
-        return "";
-    }
-    &source[start..end.min(source.len())]
-}
-
-/// 空白中非换行的部分（行内空格/tab），用于决定是否需要重排。
-pub fn inline_whitespace(ws: &str) -> &str {
-    if let Some(pos) = ws.find('\n') {
-        let after = &ws[pos + 1..];
-        // 取最后一个换行之后的部分
-        if let Some(last) = after.rfind('\n') {
-            return &after[last + 1..];
-        }
-        return after;
-    }
-    ws
-}
-
 // 字符显示宽度统一实现在 document 层（CJK 按 2 列计，tab 按 tab_width）。
 // 在此 re-export，保持 `crate::formatter::tokens::display_width` 调用点不变。
 pub use crate::document::display_width;
@@ -100,13 +79,6 @@ mod tests {
     fn collects_tokens_in_order() {
         let toks = tokens("module top; endmodule\n");
         assert_eq!(toks, ["module", "top", ";", "endmodule"]);
-    }
-
-    #[test]
-    fn inline_ws_extracts_trailing_spaces() {
-        let ws = "   \n    ";
-        assert_eq!(inline_whitespace(ws), "    ");
-        assert_eq!(inline_whitespace("   "), "   ");
     }
 
     #[test]

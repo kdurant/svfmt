@@ -820,16 +820,17 @@ fn fmt_call(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
         if child.is_named() {
             let d = fmt_expr(f, child, ctx);
             if let Some(p) = prev
-                && let Some(tok) = first_token_of(child) {
-                    let ws = f.ws(p.byte_range.1, tok.byte_range.0);
-                    // 注释后或 `(` 后换行：保留（多行调用）
-                    if has_newline(ws) && (p.is_comment || p.kind == "(") {
-                        docs.push(Doc::Newline);
-                    } else {
-                        let sep = token_sep(f, Some(&p), &tok, ctx);
-                        apply_sep(f, &mut docs, &p, &tok, sep);
-                    }
+                && let Some(tok) = first_token_of(child)
+            {
+                let ws = f.ws(p.byte_range.1, tok.byte_range.0);
+                // 注释后或 `(` 后换行：保留（多行调用）
+                if has_newline(ws) && (p.is_comment || p.kind == "(") {
+                    docs.push(Doc::Newline);
+                } else {
+                    let sep = token_sep(f, Some(&p), &tok, ctx);
+                    apply_sep(f, &mut docs, &p, &tok, sep);
                 }
+            }
             docs.push(d);
             if let Some(t) = last_token_of(child) {
                 prev = Some(t);
@@ -971,7 +972,9 @@ mod tests {
         );
         // 复杂表达式中的 `::` 同样无空格
         assert_eq!(
-            fmt_expr_src("module t; assign y = (cnt < bsp::PERIOD_TIME_CNT) ? pkg::A : pkg::B; endmodule\n"),
+            fmt_expr_src(
+                "module t; assign y = (cnt < bsp::PERIOD_TIME_CNT) ? pkg::A : pkg::B; endmodule\n"
+            ),
             "module t;\nassign y = (cnt < bsp::PERIOD_TIME_CNT) ? pkg::A : pkg::B;\nendmodule\n"
         );
     }
@@ -980,9 +983,7 @@ mod tests {
     fn macro_reference_has_no_space_between_backtick_and_name() {
         // 宏引用 `MACRO：反引号与宏名之间无空格，但运算符与反引号之间保留空格
         assert_eq!(
-            fmt_expr_src(
-                "module t; assign y = (flash_cmd == `FLASH_BUFFER_PROGRAM); endmodule\n"
-            ),
+            fmt_expr_src("module t; assign y = (flash_cmd == `FLASH_BUFFER_PROGRAM); endmodule\n"),
             "module t;\nassign y = (flash_cmd == `FLASH_BUFFER_PROGRAM);\nendmodule\n"
         );
     }
@@ -1004,7 +1005,10 @@ mod tests {
         let out = fmt_expr_src(&src);
         // 所有 else-if 都应连在一起（不允许出现 `else` 独占一行后接换行 `if`）
         assert!(!out.contains("else\n            if("), "got:\n{out}");
-        assert!(out.contains("        else if(cs[2] & ns[2])\n"), "got:\n{out}");
+        assert!(
+            out.contains("        else if(cs[2] & ns[2])\n"),
+            "got:\n{out}"
+        );
         // 幂等：再次格式化不变
         assert_eq!(out, fmt_expr_src(&out), "else-if 链格式化应幂等");
     }

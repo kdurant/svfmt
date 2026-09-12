@@ -175,6 +175,25 @@ fn is_procedural_item(node: CstNode<'_>) -> bool {
         || kind.ends_with("_construct")
 }
 
+/// `continuous_assign` 是否可参与 `=` 对齐段。
+///
+/// 两种情况不参与：
+/// - 多赋值（`assign a = 1, b = 2;`）：对齐段每行只能表示一条赋值，强行对齐会
+///   只保留最后一条、静默丢失其余赋值（见 examples/test5.sv）；
+/// - 含语法错误（ERROR）的赋值：其 CST 结构不可靠，对齐会丢失 token，改为原样输出。
+pub(crate) fn continuous_assign_alignable(node: CstNode<'_>) -> bool {
+    if node.subtree_has_error() {
+        return false;
+    }
+    for c in node.children_iter() {
+        if c.kind() == "list_of_net_assignments" || c.kind() == "list_of_variable_assignments" {
+            return c.children_iter().filter(|s| s.is_named()).count() <= 1;
+        }
+    }
+    // 结构异常（无赋值列表）：不参与对齐，按原文输出。
+    false
+}
+
 fn is_alignable(node: CstNode<'_>) -> bool {
     if node.kind() == "data_declaration" || node.kind() == "net_declaration" {
         // 含语法错误（ERROR）的声明：保留原文
@@ -219,7 +238,7 @@ fn is_alignable(node: CstNode<'_>) -> bool {
         // 行尾注释被 pad_comment 重排，见 examples/packet.sv 的 xpm_fifo_axis）
         return !node.text().contains('\n');
     }
-    matches!(node.kind(), "continuous_assign")
+    node.kind() == "continuous_assign" && continuous_assign_alignable(node)
 }
 
 fn is_decl(kind: &str) -> bool {
@@ -281,9 +300,10 @@ pub(crate) fn emit_aligned_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs:
         } else if node.kind() == "local_parameter_declaration"
             || node.kind() == "parameter_declaration"
         {
-            let (keyword, cols) = parameter_columns(f, *node);
+            let (keyword, assigns) = parameter_columns(f, *node);
+            let (name, value) = assigns.first().cloned().unwrap_or_default();
             prefixes.push(format!("{keyword} "));
-            rows.push(vec![cols[0].clone(), "=".to_string(), cols[1].clone()]);
+            rows.push(vec![name, "=".to_string(), value]);
         } else if node.kind() == "module_instantiation" {
             // 实例化语句：整行作为单列（不参与列对齐），仅用于行尾注释对齐
             prefixes.push(String::new());
@@ -320,7 +340,7 @@ pub(crate) fn emit_aligned_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs:
         })
         .map(|(i, _)| {
             let base = format!("{}{}", prefixes[i], aligned[i]);
-            base.len()
+            display_width(&base, f.cfg.tab_width as usize)
         })
         .max()
         .unwrap_or(0);
@@ -720,8 +740,9 @@ fn eq_columns(
             }
         }
         "local_parameter_declaration" | "parameter_declaration" => {
-            let (prefix, cols) = parameter_columns(f, node);
-            ("param", prefix, cols[0].clone(), Some(cols[1].clone()))
+            let (prefix, assigns) = parameter_columns(f, node);
+            let (name, value) = assigns.first().cloned().unwrap_or_default();
+            ("param", prefix, name, Some(value))
         }
         "continuous_assign" => {
             let cols = assign_columns(f, node);

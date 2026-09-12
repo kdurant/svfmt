@@ -3,6 +3,7 @@
 use crate::document::Doc;
 use crate::formatter::Formatter;
 use crate::formatter::expressions::fmt_expr;
+use crate::formatter::tokens::display_width;
 use crate::parser::CstNode;
 
 use super::fmt_seq_block;
@@ -24,6 +25,7 @@ pub(crate) fn fmt_conditional(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     //   else 行     → code_end_rel = 4（"else"）
     //   else if 行  → code_end_rel = "else if(cond)" 宽
     let indent_w = f.cfg.indent_width as usize;
+    let tw = f.cfg.tab_width as usize;
     let mut pts: Vec<(usize, usize, usize)> = Vec::new();
     {
         let has_inline = |node: CstNode<'_>, next: &CstNode<'_>| -> bool {
@@ -40,7 +42,7 @@ pub(crate) fn fmt_conditional(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                     if !matches!(inner.kind(), "seq_block" | "conditional_statement")
                         && items.get(i + 1).map(|n| has_inline(*c, n)).unwrap_or(false)
                     {
-                        let w = render_doc(f, f.fmt(*c)).chars().count();
+                        let w = display_width(&render_doc(f, f.fmt(*c)), tw);
                         pts.push((c.byte_range().start, c.byte_range().end, indent_w + w));
                     }
                 }
@@ -55,10 +57,10 @@ pub(crate) fn fmt_conditional(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                         after
                     };
                     if cc.map(|n| has_inline(*c, n)).unwrap_or(false) {
-                        let cond_w =
-                            render_doc(f, crate::formatter::module::fmt_cond_expression(f, *c))
-                                .chars()
-                                .count();
+                        let cond_w = display_width(
+                            &render_doc(f, crate::formatter::module::fmt_cond_expression(f, *c)),
+                            tw,
+                        );
                         let mut w = 4 + 1 + 2 + cond_w;
                         if f.cfg.space.before_control_statement_parens {
                             w += 1;
@@ -180,12 +182,13 @@ pub(crate) fn fmt_conditional(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                 {
                     let pad = match target_for(child.byte_range().start) {
                         Some(t) => {
-                            let cond_w = render_doc(
-                                f,
-                                crate::formatter::module::fmt_cond_expression(f, *child),
-                            )
-                            .chars()
-                            .count();
+                            let cond_w = display_width(
+                                &render_doc(
+                                    f,
+                                    crate::formatter::module::fmt_cond_expression(f, *child),
+                                ),
+                                tw,
+                            );
                             let mut w = 4 + 1 + 2 + cond_w;
                             if f.cfg.space.before_control_statement_parens {
                                 w += 1;
@@ -224,38 +227,42 @@ pub(crate) fn fmt_conditional(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                     if matches!(inner.kind(), "seq_block" | "conditional_statement") {
                         docs.push(fmt_body(f, *child, 0));
                     } else {
-                    // 单语句：检查其后的行尾注释
-                    let trailing_comment = items.get(i + 1).filter(|n| {
-                        n.is_named()
-                            && n.kind().ends_with("comment")
-                            && !f
-                                .ws(child.byte_range().end, n.byte_range().start)
-                                .contains('\n')
-                    });
-                    let body_doc = f.fmt(*child);
-                    if let Some(cmt) = trailing_comment {
-                        let text = render_doc(f, body_doc);
-                        let semi_rel = text.rfind(';').unwrap_or(0);
-                        // 语句内行尾注释：默认对齐到 semi+3；连续 run 时对齐到目标列
-                        let base_indent = f.cfg.comment_column as usize;
-                        let bms = match target_for(child.byte_range().start) {
-                            Some(t) => (t - indent_w).saturating_sub(3),
-                            None => semi_rel,
-                        };
-                        let padded = crate::formatter::module::pad_comment_pub(
-                            f,
-                            &text,
-                            cmt.text(),
-                            base_indent,
-                            bms,
-                        );
-                        docs.push(Doc::Indent);
-                        docs.push(Doc::text(padded));
-                        docs.push(Doc::Dedent);
-                    } else {
-                        docs.push(fmt_body(f, *child, 0));
+                        // 单语句：检查其后的行尾注释
+                        let trailing_comment = items.get(i + 1).filter(|n| {
+                            n.is_named()
+                                && n.kind().ends_with("comment")
+                                && !f
+                                    .ws(child.byte_range().end, n.byte_range().start)
+                                    .contains('\n')
+                        });
+                        let body_doc = f.fmt(*child);
+                        if let Some(cmt) = trailing_comment {
+                            let text = render_doc(f, body_doc);
+                            // `;` 所在列（按显示宽度，非字节偏移）
+                            let semi_rel = text
+                                .rfind(';')
+                                .map(|i| display_width(&text[..i], tw))
+                                .unwrap_or(0);
+                            // 语句内行尾注释：默认对齐到 semi+3；连续 run 时对齐到目标列
+                            let base_indent = f.cfg.comment_column as usize;
+                            let bms = match target_for(child.byte_range().start) {
+                                Some(t) => (t - indent_w).saturating_sub(3),
+                                None => semi_rel,
+                            };
+                            let padded = crate::formatter::module::pad_comment_pub(
+                                f,
+                                &text,
+                                cmt.text(),
+                                base_indent,
+                                bms,
+                            );
+                            docs.push(Doc::Indent);
+                            docs.push(Doc::text(padded));
+                            docs.push(Doc::Dedent);
+                        } else {
+                            docs.push(fmt_body(f, *child, 0));
+                        }
                     }
-                }
                 }
                 is_else = false;
                 cond_after_else = false;

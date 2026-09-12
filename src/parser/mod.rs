@@ -64,10 +64,33 @@ impl SvParser {
 /// 递归收集树中所有 `ERROR` 节点。
 ///
 /// 用于校验解析结果，方便测试和 CLI 输出错误定位。
+///
+/// 注意：此函数**不包含** `MISSING` 节点，因此计数可能小于 [`CstTree::has_error`]
+/// 的判定范围。需要与 `has_error()` 一致时请用 [`collect_problem_nodes`]。
 pub fn collect_error_nodes(root: CstNode<'_>) -> Vec<CstNode<'_>> {
     let mut errors = Vec::new();
     collect_error_nodes_rec(root, &mut errors);
     errors
+}
+
+/// 递归收集树中所有语法问题节点：`ERROR` 与 `MISSING`。
+///
+/// `tree_sitter::Node::has_error()` 对两者都返回 true，因此需要"是否解析成功 /
+/// 是否以非零状态退出"时，计数必须使用本函数，否则只含 `MISSING` 的源码会被
+/// 判为无错误（`--fail-on-parse-error` 不生效）。
+pub fn collect_problem_nodes(root: CstNode<'_>) -> Vec<CstNode<'_>> {
+    let mut out = Vec::new();
+    collect_problem_nodes_rec(root, &mut out);
+    out
+}
+
+fn collect_problem_nodes_rec<'tree>(node: CstNode<'tree>, out: &mut Vec<CstNode<'tree>>) {
+    if node.is_error() || node.is_missing() {
+        out.push(node);
+    }
+    for child in node.children_iter() {
+        collect_problem_nodes_rec(child, out);
+    }
 }
 
 fn collect_error_nodes_rec<'tree>(node: CstNode<'tree>, out: &mut Vec<CstNode<'tree>>) {
@@ -459,6 +482,25 @@ mod tests {
         for e in &errors {
             assert!(e.is_error(), "ERROR 节点 is_error 应为 true");
         }
+    }
+
+    #[test]
+    fn missing_nodes_count_as_problems() {
+        // 缺少 `end` 时 tree-sitter 产生 MISSING 节点而非 ERROR：
+        // `has_error()` 为 true，但 `collect_error_nodes` 收不到它，
+        // 必须用 `collect_problem_nodes` 才能与 `has_error()` 保持一致。
+        let (_, tree) = parse("module m; initial begin a = 1; endmodule\n");
+        assert!(tree.has_error(), "缺失 token 应标记 has_error");
+        assert!(
+            collect_error_nodes(tree.root_node()).is_empty(),
+            "该输入不含 ERROR 节点（说明必须依赖 MISSING 计数）"
+        );
+        let problems = collect_problem_nodes(tree.root_node());
+        assert!(!problems.is_empty(), "应收集到 MISSING/ERROR 节点");
+        assert!(
+            problems.iter().any(|n| n.is_missing()),
+            "应包含 MISSING 节点"
+        );
     }
 
     #[test]

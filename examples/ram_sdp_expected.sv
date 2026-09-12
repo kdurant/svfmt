@@ -662,6 +662,7 @@ begin : l_basic
     )
     ram
     (
+        .*
     );
 end
 else
@@ -674,6 +675,7 @@ else
         )
         ram
         (
+            .*
         );
     end
     else
@@ -686,6 +688,7 @@ else
             )
             ram
             (
+                .*
             );
         end
         else
@@ -698,6 +701,7 @@ else
                 )
                 ram
                 (
+                    .*
                 );
 
             end
@@ -713,6 +717,7 @@ else
                     )
                     ram
                     (
+                        .*
                     );
                 end
                 else
@@ -728,6 +733,7 @@ else
                         )
                         ram
                         (
+                            .*
                         );
                     end
                     else
@@ -743,6 +749,7 @@ else
                             )
                             ram
                             (
+                                .*
                             );
                         end
                         else
@@ -758,6 +765,7 @@ else
                                 )
                                 ram
                                 (
+                                    .*
                                 );
                             end
                             else
@@ -773,6 +781,7 @@ else
                                     )
                                     ram
                                     (
+                                        .*
                                     );
                                 end
                                 else

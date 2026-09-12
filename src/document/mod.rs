@@ -4,8 +4,6 @@
 //!
 //! `Doc` 由 Formatter 生成，`render` 负责把 Doc 渲染为最终文本。
 
-use std::fmt::Write as _;
-
 use crate::config::FormatterConfig;
 
 /// 格式化文档元素。
@@ -184,7 +182,7 @@ impl Renderer<'_> {
                         self.emit(c);
                     }
                 } else {
-                    self.emit_group(children, 0);
+                    self.emit_group(children);
                 }
             }
             Doc::Fill(children) => {
@@ -214,13 +212,13 @@ impl Renderer<'_> {
         }
     }
 
-    fn emit_group(&mut self, children: &[Doc], _depth: usize) {
+    fn emit_group(&mut self, children: &[Doc]) {
         // 组内只考虑本组范围是否超出列宽；超宽则在 SoftLine 处换行。
         let mut trial = self.clone_partial();
         for c in children {
             trial.emit(c);
         }
-        let fits = trial.column <= self.options.column_limit || _depth > 4;
+        let fits = trial.column <= self.options.column_limit;
         if fits {
             for c in children {
                 self.emit(c);
@@ -261,8 +259,7 @@ impl Renderer<'_> {
                     trial.column += 1;
                 }
                 let mut k = j + 1;
-                while k < children.len()
-                    && !matches!(children[k], Doc::SoftLine | Doc::SoftLineNil)
+                while k < children.len() && !matches!(children[k], Doc::SoftLine | Doc::SoftLineNil)
                 {
                     trial.emit(&children[k]);
                     k += 1;
@@ -386,8 +383,9 @@ impl RendererPart<'_> {
             }
             Doc::Text(s) => self.column += display_width(s, self.options.tab_width),
             Doc::Space | Doc::SoftLine => self.column += 1,
+            // 试排只关心列宽：换行后列归零（缩进不计入宽度估算）
             Doc::Newline | Doc::BlankLines(_) => {
-                self.column = self.options.indent_width.saturating_mul(0);
+                self.column = 0;
             }
             Doc::Group(children) => {
                 for c in children {
@@ -404,6 +402,11 @@ impl RendererPart<'_> {
 }
 
 /// 计算字符串在终端上的显示宽度（CJK 字符按 2 列计，tab 按 `tab_width`）。
+///
+/// 这是**启发式**实现：以码位 `> 0x2E80` 近似判定"宽字符"，能覆盖 CJK 汉字、
+/// 全角标点等常见情形，但不等价于完整的 East Asian Width 表。若需要精确宽度，
+/// 可改用 `unicode-width`。整个 formatter 的列宽/对齐计算都应经由此函数，
+/// 不要混用 `str::len()`（字节）或 `chars().count()`（字符数）。
 pub fn display_width(s: &str, tab_width: usize) -> usize {
     let mut width = 0;
     for c in s.chars() {
@@ -418,16 +421,6 @@ pub fn display_width(s: &str, tab_width: usize) -> usize {
     width
 }
 
-/// 把 Doc 序列拼接渲染。
-pub fn render_sequence(docs: &[Doc], options: &RenderOptions) -> String {
-    let doc = if docs.len() == 1 {
-        docs[0].clone()
-    } else {
-        Doc::Group(docs.to_vec())
-    };
-    render(&doc, options)
-}
-
 /// 对齐渲染：用于对齐段 / 实例连接列宽的中间渲染，**强制单行**（column_limit=0）。
 ///
 /// 对齐依赖单行文本来计算列宽；若 column_limit 让内部 SoftLine 断行，会得到
@@ -437,11 +430,6 @@ pub fn render_inline(doc: &Doc, cfg: &FormatterConfig) -> String {
     let mut opts = RenderOptions::from(cfg);
     opts.column_limit = 0;
     render(doc, &opts)
-}
-
-/// 追加文本到 String（实现 fmt::Write）。
-pub fn push_to(s: &mut String, text: &str) {
-    let _ = write!(s, "{text}");
 }
 
 #[cfg(test)]
