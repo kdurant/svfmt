@@ -436,14 +436,12 @@ fn fmt_task_function_body(f: &Formatter<'_>, body_nodes: &[CstNode<'_>]) -> Vec<
                     docs.push(Doc::Space);
                 }
             }
-            // 保留原文：首行补源码起始列缩进，内部行保留源码缩进
-            let col = node.start_position().column;
-            let mut text = String::new();
-            for _ in 0..col {
-                text.push(' ');
-            }
-            text.push_str(node.text());
-            docs.push(Doc::text(text));
+            // 非赋值语句/声明/注释：原文保留，与赋值段一样缩进一级，内部行由
+            // 渲染器按当前缩进统一重排。此前首行补"源码起始列"空格，会与当前
+            // 缩进叠加，嵌套时缩进逐轮漂移（且与赋值段缩进级别不一致）。
+            docs.push(Doc::Indent);
+            docs.push(f.fmt_default(*node));
+            docs.push(Doc::Dedent);
         }
         prev_end = Some(node.byte_range().end);
         first = false;
@@ -662,65 +660,70 @@ fn assignment_columns(node: CstNode<'_>) -> Option<(String, String, CstNode<'_>)
     Some((lhs, op, rhs))
 }
 
-/// loop_statement（for）。
+/// loop_statement：`for` / `while` / `do...while` / `repeat` / `forever` / `foreach`。
+///
+/// 头部（关键字 + `(...)`）与 body 按位置切分：
+/// - `for`/`while`/`repeat`/`foreach`：头部到头一个配对 `)` 为止；
+/// - `do`/`forever`：头部仅关键字本身；
+/// - `do` 的 `while (cond);` 属于 body 之后的**尾部**，必须保留（否则条件丢失）。
+///
+/// body 不再限定为 `statement_or_null`/`generate_block`：`foreach`、`do` 的 body
+/// 可能是裸语句节点，此前会被静默跳过导致整个循环体丢失。
 pub fn fmt_loop_statement(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
-    let mut docs: Vec<Doc> = Vec::new();
     let items: Vec<CstNode<'_>> = node.children();
-    let mut i = 0;
-    let mut body: Option<CstNode<'_>> = None;
-    // for ( init ; cond ; update ) body
-    let mut in_header = true;
-    while i < items.len() {
-        let c = items[i];
-        match c.kind() {
-            "for" => {
-                if f.svdbg() {
-                    eprintln!("[loop] FOR");
+    if items.is_empty() {
+        return f.raw(node);
+    }
+    // 头部结束位置（body 起始下标）
+    let head_kw = items[0].kind();
+    let mut header_end = 1usize;
+    if !matches!(head_kw, "do" | "forever") && items.get(1).is_some_and(|c| c.kind() == "(") {
+        let mut depth = 0usize;
+        for (k, c) in items.iter().enumerate().skip(1) {
+            match c.kind() {
+                "(" => depth += 1,
+                ")" => {
+                    depth -= 1;
+                    if depth == 0 {
+                        header_end = k + 1;
+                        break;
+                    }
                 }
-                docs.push(Doc::text("for"));
-                if f.cfg.space.before_control_statement_parens {
-                    docs.push(Doc::Space);
-                }
-                i += 1;
-            }
-            "(" => {
-                if f.svdbg() {
-                    eprintln!("[loop] OPEN");
-                }
-                docs.push(Doc::text("("));
-                i += 1;
-            }
-            ")" => {
-                docs.push(Doc::text(")"));
-                i += 1;
-                in_header = false;
-            }
-            "statement_or_null" | "generate_block" => {
-                body = Some(c);
-                break;
-            }
-            ";" => {
-                docs.push(Doc::text(";"));
-                // 分号后空格（AfterSemicolon）
-                if in_header && f.cfg.space.after_semicolon {
-                    docs.push(Doc::Space);
-                }
-                i += 1;
-            }
-            _ if in_header => {
-                docs.push(fmt_expr(
-                    f,
-                    c,
-                    &crate::formatter::expressions::ExprCtx::default(),
-                ));
-                i += 1;
-            }
-            _ => {
-                i += 1;
+                _ => {}
             }
         }
     }
-    if let Some(b) = body {
+    let mut docs: Vec<Doc> = Vec::new();
+    for (k, c) in items.iter().enumerate().take(header_end) {
+        match c.kind() {
+            "for" | "while" | "do" | "repeat" | "forever" | "foreach" => {
+                docs.push(Doc::text(c.text()));
+                if f.cfg.space.before_control_statement_parens
+                    && items.get(k + 1).is_some_and(|n| n.kind() == "(")
+                {
+                    docs.push(Doc::Space);
+                }
+            }
+            "(" => docs.push(Doc::text("(")),
+            ")" => docs.push(Doc::text(")")),
+            ";" => {
+                docs.push(Doc::text(";"));
+                // 分号后空格（AfterSemicolon）
+                if f.cfg.space.after_semicolon {
+                    docs.push(Doc::Space);
+                }
+            }
+            // 其它头部节点（for 的 init/cond/step、foreach 的 loop_variables 等）
+            _ => docs.push(fmt_expr(
+                f,
+                *c,
+                &crate::formatter::expressions::ExprCtx::default(),
+            )),
+        }
+    }
+    // body
+    let mut idx = header_end;
+    if let Some(b) = items.get(idx).copied() {
         let inner = unwrap_statement(f, b);
         if inner.kind() == "generate_block" || inner.kind() == "seq_block" {
             docs.push(Doc::Newline);
@@ -731,6 +734,80 @@ pub fn fmt_loop_statement(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                 "conditional_statement" => fmt_conditional(f, inner),
                 _ => Doc::concat(vec![Doc::Indent, f.fmt(b), Doc::Dedent]),
             });
+        }
+        idx += 1;
+        // 裸语句 body（`do i++;`、`foreach (...) x = i;`）的结束分号是兄弟节点
+        if items.get(idx).is_some_and(|c| c.kind() == ";") {
+            docs.push(Doc::text(";"));
+            idx += 1;
+        }
+    }
+    // body 之后的尾部：`do ... while (cond);` 的 while 条件
+    let mut first_tail = true;
+    for c in items.iter().skip(idx) {
+        match c.kind() {
+            "while" => {
+                if first_tail {
+                    docs.push(Doc::Newline);
+                }
+                docs.push(Doc::text("while"));
+                if f.cfg.space.before_control_statement_parens {
+                    docs.push(Doc::Space);
+                }
+            }
+            "(" => docs.push(Doc::text("(")),
+            ")" => docs.push(Doc::text(")")),
+            ";" => docs.push(Doc::text(";")),
+            _ => docs.push(fmt_expr(
+                f,
+                *c,
+                &crate::formatter::expressions::ExprCtx::default(),
+            )),
+        }
+        first_tail = false;
+    }
+    Doc::concat(docs)
+}
+
+/// par_block：`fork [: label] ... join|join_any|join_none [: label]`。
+///
+/// 此前 `par_block` 无处理分支，落到原文输出：多行原文的内部缩进会被渲染器
+/// 再次叠加，导致多次格式化缩进逐轮增长（幂等性破坏）。
+pub fn fmt_par_block(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
+    let children: Vec<CstNode<'_>> = node.children();
+    let mut docs: Vec<Doc> = Vec::new();
+    let mut idx = 0usize;
+    // `fork [: label]`
+    if children.first().is_some_and(|c| c.kind() == "fork") {
+        docs.push(Doc::text("fork"));
+        idx = 1;
+        if children.get(idx).is_some_and(|c| c.kind() == ":")
+            && children.get(idx + 1).is_some_and(|c| c.kind() == "simple_identifier")
+        {
+            docs.push(Doc::text(" : "));
+            docs.push(Doc::text(children[idx + 1].text()));
+            idx += 2;
+        }
+    }
+    // 结束关键字节点的 kind 是 `join_keyword`（文本为 join/join_any/join_none）
+    let end_idx = children.iter().position(|c| c.kind() == "join_keyword");
+    let body_end = end_idx.unwrap_or(children.len());
+    let body: Vec<CstNode<'_>> = children[idx.min(body_end)..body_end].to_vec();
+    docs.push(Doc::Newline);
+    docs.push(Doc::Indent);
+    for d in fmt_seq_block_body(f, &body) {
+        docs.push(d);
+    }
+    docs.push(Doc::Dedent);
+    docs.push(Doc::Newline);
+    if let Some(ei) = end_idx {
+        docs.push(Doc::text(children[ei].text()));
+        // `join : label`
+        if children.get(ei + 1).is_some_and(|c| c.kind() == ":")
+            && children.get(ei + 2).is_some_and(|c| c.kind() == "simple_identifier")
+        {
+            docs.push(Doc::text(" : "));
+            docs.push(Doc::text(children[ei + 2].text()));
         }
     }
     Doc::concat(docs)
@@ -1014,40 +1091,53 @@ pub fn has_colon_label(children: &[CstNode<'_>]) -> bool {
 /// 这里 body 经 `fmt_task_function_body`（赋值对齐、非赋值语句保留原文），
 /// endtask/endfunction 单独输出在当前缩进级别，与 task/function 对齐。
 pub fn fmt_task_or_function_declaration(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
-    let (body_kind, stmt_kind, end_kind) = if node.kind() == "task_declaration" {
-        ("task_body_declaration", "statement_or_null", "endtask")
+    let (body_kind, end_kind) = if node.kind() == "task_declaration" {
+        ("task_body_declaration", "endtask")
     } else {
-        (
-            "function_body_declaration",
-            "function_statement_or_null",
-            "endfunction",
-        )
+        ("function_body_declaration", "endfunction")
     };
-    let body = node.children().into_iter().find(|c| c.kind() == body_kind);
-    if let Some(b) = body {
-        let b_children: Vec<CstNode<'_>> = b.children();
-        let stmts: Vec<CstNode<'_>> = b_children
-            .iter()
-            .filter(|c| c.kind() == stmt_kind)
-            .copied()
-            .collect();
-        let end = b_children.iter().find(|c| c.kind() == end_kind).copied();
-        if let (Some(first), Some(_e)) = (stmts.first(), end) {
-            // 头：从节点开始到第一个 body 语句之前（原文，保留多行端口列表）
-            let header_raw = &node.text()[..(first.byte_range().start - node.byte_range().start)];
-            let header = header_raw.trim_end();
-            // 头与第一个语句之间的空行
-            let blanks = crate::formatter::count_blank_lines(&header_raw[header.len()..]);
-            let mut docs = vec![Doc::text(header.to_string())];
-            docs.push(Doc::Newline);
-            if blanks > 0 {
-                docs.push(Doc::BlankLines(blanks));
+    let Some(body) = node.children().into_iter().find(|c| c.kind() == body_kind) else {
+        return f.raw(node);
+    };
+    let b_children: Vec<CstNode<'_>> = body.children();
+    // 头部：到第一个括号深度为 0 的 `;` 为止（含）。其后直到 endtask/endfunction
+    // 之间的**全部**子节点都属于 body——包括声明、注释与 ERROR 恢复节点。
+    // 此前只收集 `statement_or_null` 系节点，导致函数体内的声明与注释被静默
+    // 丢弃（如 `int y;` 只剩 `y;`）。
+    let mut depth = 0usize;
+    let mut header_end: Option<(usize, usize)> = None;
+    for (k, c) in b_children.iter().enumerate() {
+        match c.kind() {
+            "(" => depth += 1,
+            ")" => depth = depth.saturating_sub(1),
+            ";" if depth == 0 => {
+                header_end = Some((k, c.byte_range().end));
+                break;
             }
-            docs.extend(fmt_task_function_body(f, &stmts));
-            docs.push(Doc::Newline);
-            docs.push(Doc::text(end_kind));
-            return Doc::concat(docs);
+            _ => {}
         }
     }
-    f.raw(node)
+    let Some((h_idx, h_end)) = header_end else {
+        return f.raw(node);
+    };
+    // 头：从节点起点到头部 `;`（原文，保留多行端口列表）
+    let header_raw = &f.src[node.byte_range().start..h_end];
+    let header = header_raw.trim_end();
+    let body_items: Vec<CstNode<'_>> = b_children[h_idx + 1..]
+        .iter()
+        .filter(|c| c.kind() != end_kind)
+        .copied()
+        .collect();
+    // 头与第一个 body 元素之间的空行
+    let first_start = body_items.first().map_or(h_end, |c| c.byte_range().start);
+    let blanks = crate::formatter::count_blank_lines(&f.src[h_end..first_start]);
+    let mut docs = vec![Doc::text(header.to_string())];
+    docs.push(Doc::Newline);
+    if blanks > 0 {
+        docs.push(Doc::BlankLines(blanks));
+    }
+    docs.extend(fmt_task_function_body(f, &body_items));
+    docs.push(Doc::Newline);
+    docs.push(Doc::text(end_kind));
+    Doc::concat(docs)
 }

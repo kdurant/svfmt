@@ -128,6 +128,11 @@ pub(crate) fn fmt_conditional(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     let mut cond_after_else = false;
     for (i, child) in items.iter().enumerate() {
         match child.kind() {
+            // `unique`/`unique0`/`priority` 限定符：原样输出，不能丢（丢了会改变仿真语义）。
+            "unique_priority" => {
+                docs.push(Doc::text(child.text()));
+                docs.push(Doc::Space);
+            }
             "if" => {
                 if is_else {
                     docs.push(Doc::Space);

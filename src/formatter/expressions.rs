@@ -70,6 +70,7 @@ pub fn is_value_kind(kind: &str) -> bool {
             | "implicit_class_handle"
             | "function_call"
             | "system_function_call"
+            | "function_subroutine_call"
             | "method_call"
             | "call"
             | "class_new"
@@ -487,6 +488,9 @@ pub fn fmt_expr(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
         | "tf_call"
         | "subroutine_call"
         | "subroutine_call_statement"
+        // `function_subroutine_call` 是 `f(...)` 的外层包装：若不走 fmt_call，
+        // 会落到 fmt_default 的 token 路径而丢失位选上下文（`i[7:0]` → `i[7 : 0]`）。
+        | "function_subroutine_call"
         | "class_new" => fmt_call(f, node, ctx),
         "assignment_expression"
         | "blocking_assignment"
@@ -510,6 +514,9 @@ fn is_container_expr(kind: &str) -> bool {
             | "primary"
             | "constant_primary"
             | "event_expression"
+            // `if`/`while` 等的条件包装节点：需递归以保留位选上下文
+            // （否则 `dec[7:0]` 会被 token 路径写成 `dec[7 : 0]`）
+            | "cond_predicate"
             | "expression_list"
             | "constant_expression_list"
             | "list_of_arguments"

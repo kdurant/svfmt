@@ -294,7 +294,7 @@ pub(crate) fn emit_aligned_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs:
             prefixes.push(String::new());
             rows.push(declaration_columns(f, *node));
         } else if node.kind() == "continuous_assign" {
-            prefixes.push("assign ".to_string());
+            prefixes.push(format!("{} ", continuous_assign_prefix(f, *node)));
             let cols = assign_columns(f, *node);
             rows.push(cols);
         } else if node.kind() == "local_parameter_declaration"
@@ -547,6 +547,27 @@ fn declaration_columns(f: &Formatter<'_>, node: CstNode<'_>) -> Vec<String> {
     vec![type_part, name_part]
 }
 
+/// `continuous_assign` 的前缀原文：`assign` 及其可选的延时/驱动强度，
+/// 如 `assign #1`、`assign (strong0, weak1)`。
+///
+/// 这些节点是赋值列表的兄弟节点，必须显式保留——否则延时与驱动强度会被
+/// 静默丢弃（`assign #1 a = b;` → `assign a = b;`，改变电路语义）。
+fn continuous_assign_prefix(f: &Formatter<'_>, node: CstNode<'_>) -> String {
+    let _ = f;
+    let mut parts: Vec<&str> = Vec::new();
+    for c in node.children_iter() {
+        if c.kind() == "list_of_net_assignments" || c.kind() == "list_of_variable_assignments" {
+            break;
+        }
+        parts.push(c.text());
+    }
+    parts
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// assign 行的列内容：LHS、`=`、RHS。
 fn assign_columns(f: &Formatter<'_>, node: CstNode<'_>) -> Vec<String> {
     let mut lhs = String::new();
@@ -748,7 +769,7 @@ fn eq_columns(
             let cols = assign_columns(f, node);
             (
                 "assign",
-                format!("assign {}", cols[0]),
+                format!("{} {}", continuous_assign_prefix(f, node), cols[0]),
                 String::new(),
                 Some(cols[2].clone()),
             )

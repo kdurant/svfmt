@@ -193,6 +193,7 @@ impl<'a> Formatter<'a> {
                 statements::fmt_task_or_function_declaration(self, node)
             }
             "seq_block" => statements::fmt_seq_block(self, node),
+            "par_block" => statements::fmt_par_block(self, node),
             "conditional_statement" => statements::fmt_conditional(self, node),
             "case_statement" => statements::fmt_case_statement(self, node),
             "case_generate_construct" => statements::fmt_case_generate_construct(self, node),
@@ -293,8 +294,16 @@ impl<'a> Formatter<'a> {
     }
 
     /// 默认格式化：输出节点原文。
+    ///
+    /// 多行节点会先按节点起始列剥掉内部行的缩进，再交给渲染器按当前缩进重排。
+    /// 否则原文里的源缩进会与当前缩进叠加，使多次格式化时缩进逐轮累积
+    /// （幂等性破坏，如 `randcase` 等未结构化节点）。
     pub fn fmt_default(&self, node: CstNode<'_>) -> Doc {
-        self.raw(node)
+        let text = node.text();
+        if !text.contains('\n') {
+            return Doc::text(text);
+        }
+        Doc::text(strip_indent(text, node.start_position().column))
     }
 
     /// 语句包装节点（statement_or_null/statement/statement_item）：
@@ -338,6 +347,40 @@ impl<'a> Formatter<'a> {
 pub fn count_blank_lines(ws: &str) -> usize {
     let nl = ws.matches('\n').count();
     nl.saturating_sub(1)
+}
+
+/// 剥掉多行文本内部行（第 2 行起）的前导空白，最多剥 `strip` 列，
+/// 且不超过内部行的公共前导空白。
+///
+/// 首行原样保留；全空行不参与统计。用于原文输出路径：内部行既保留原有相对
+/// 缩进（不会因过度剥离而丢结构），又避免"源缩进 + 当前缩进"叠加导致多次
+/// 格式化时缩进累积。
+pub fn strip_indent(text: &str, strip: usize) -> String {
+    let lines: Vec<&str> = text.split('\n').collect();
+    if lines.len() <= 1 || strip == 0 {
+        return text.to_string();
+    }
+    let common = lines
+        .iter()
+        .skip(1)
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.len() - l.trim_start_matches([' ', '\t']).len())
+        .min()
+        .unwrap_or(0);
+    let strip = strip.min(common);
+    if strip == 0 {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    for (i, line) in lines.iter().enumerate() {
+        if i > 0 {
+            out.push('\n');
+            out.push_str(&line[strip.min(line.len())..]);
+        } else {
+            out.push_str(line);
+        }
+    }
+    out
 }
 
 /// 判断 Doc 是否以 `;` 结尾（逆序遍历找到最后一个 Text）。

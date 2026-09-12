@@ -68,9 +68,9 @@ begin
     begin
         for(int i = 0; i < 256; ++i)
         begin
-            code = u_enc.encode_8b10b(i[7 : 0], 1'b0, rd0[0]);
+            code = u_enc.encode_8b10b(i[7:0], 1'b0, rd0[0]);
             dec  = u_enc.decode_8b10b(code);
-            if(dec[7 : 0] != i[7 : 0] || dec[8] != 1'b0)
+            if(dec[7:0] != i[7:0] || dec[8] != 1'b0)
             begin
                 if(fail_rts < 8)
                     $display(
@@ -93,7 +93,7 @@ begin
     code = u_enc.encode_8b10b(8'hBC, 1'b1, 1'b0);
     dec  = u_enc.decode_8b10b(code);
     checks++;
-    if(dec[8] != 1'b1 || dec[7 : 0] != 8'hBC)
+    if(dec[8] != 1'b1 || dec[7:0] != 8'hBC)
     begin
         errors++;
         $display("FAIL K28.5 decode got K=%0d data=%02X", dec[8], dec[7:0]);
@@ -101,7 +101,7 @@ begin
     code = u_enc.encode_8b10b(8'h7C, 1'b1, 1'b1);
     dec  = u_enc.decode_8b10b(code);
     checks++;
-    if(dec[8] != 1'b1 || dec[7 : 0] != 8'h7C)
+    if(dec[8] != 1'b1 || dec[7:0] != 8'h7C)
     begin
         errors++;
         $display("FAIL K28.3 decode got K=%0d data=%02X", dec[8], dec[7:0]);

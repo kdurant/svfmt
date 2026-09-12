@@ -15,53 +15,61 @@ use super::unwrap_statement;
 pub(crate) fn fmt_case_statement(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     let mut docs: Vec<Doc> = Vec::new();
     let items: Vec<CstNode<'_>> = node.children();
-    // case 关键字 + 表达式
+    // case 关键字 + 限定符 + 表达式
     let mut i = 0;
     while i < items.len() {
         let c = items[i];
-        if c.kind() == "case_keyword" || c.kind() == "casez_keyword" || c.kind() == "casex_keyword"
+        // 头部结束：进入 case item / endcase。注释也交给下面的 item 事件按行输出，
+        // 否则会被粘到 `case(...)` 行尾。
+        if matches!(c.kind(), "case_item" | "case_inside_item" | "endcase")
+            || (c.is_named() && c.kind().ends_with("comment"))
         {
-            let text = match f.cfg.reformat_case {
-                crate::config::ReformatCase::None => c.text(),
-                crate::config::ReformatCase::Casez => "casez",
-                crate::config::ReformatCase::Casex => "casex",
-            };
-            docs.push(Doc::text(text));
-            if f.cfg.space.before_control_statement_parens {
+            break;
+        }
+        match c.kind() {
+            "case_keyword" | "casez_keyword" | "casex_keyword" => {
+                let text = match f.cfg.reformat_case {
+                    crate::config::ReformatCase::None => c.text(),
+                    crate::config::ReformatCase::Casez => "casez",
+                    crate::config::ReformatCase::Casex => "casex",
+                };
+                docs.push(Doc::text(text));
+                if f.cfg.space.before_control_statement_parens {
+                    docs.push(Doc::Space);
+                }
+            }
+            "(" => docs.push(Doc::text("(")),
+            ")" => docs.push(Doc::text(")")),
+            // `unique`/`unique0`/`priority` 限定符：必须保留，否则改变仿真语义
+            "unique_priority" => {
+                docs.push(Doc::text(c.text()));
                 docs.push(Doc::Space);
             }
-            i += 1;
-            continue;
-        }
-        if c.kind() == "(" {
-            docs.push(Doc::text("("));
-            i += 1;
-            continue;
-        }
-        if c.kind() == ")" {
-            docs.push(Doc::text(")"));
-            i += 1;
-            continue;
-        }
-        if c.kind() == "case_expression" {
-            docs.push(fmt_expr(
+            // `case (x) inside ...` 的 `inside` 关键字
+            "inside" => {
+                docs.push(Doc::Space);
+                docs.push(Doc::text("inside"));
+            }
+            "case_expression" => docs.push(fmt_expr(
                 f,
                 c,
                 &crate::formatter::expressions::ExprCtx::default(),
-            ));
-            i += 1;
-            continue;
+            )),
+            // 其它未识别头部节点：原样输出，绝不静默丢弃
+            _ => docs.push(f.fmt(c)),
         }
-        break;
+        i += 1;
     }
-    // 收集 case_item 与注释（按顺序）
+    // 收集 case item（含 `case ... inside` 的 case_inside_item）与注释（按顺序）
     let mut events: Vec<CstNode<'_>> = Vec::new();
     while i < items.len() {
         let c = items[i];
         if c.kind() == "endcase" {
             break;
         }
-        if c.kind() == "case_item" || (c.is_named() && c.kind().ends_with("comment")) {
+        if matches!(c.kind(), "case_item" | "case_inside_item")
+            || (c.is_named() && c.kind().ends_with("comment"))
+        {
             events.push(c);
         }
         i += 1;
@@ -69,7 +77,7 @@ pub(crate) fn fmt_case_statement(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     // 计算对齐宽度（表达式文本）
     let items_only: Vec<CstNode<'_>> = events
         .iter()
-        .filter(|c| c.kind() == "case_item")
+        .filter(|c| matches!(c.kind(), "case_item" | "case_inside_item"))
         .copied()
         .collect();
     let tw = f.cfg.tab_width as usize;
@@ -157,7 +165,7 @@ pub(crate) fn fmt_case_statement(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     let mut current: Option<(String, usize)> = None; // (单行文本, items_only 索引)
     let mut pi = 0usize;
     for c in &events {
-        if c.kind() == "case_item" {
+        if matches!(c.kind(), "case_item" | "case_inside_item") {
             if let Some((l, _)) = current.take() {
                 out_texts.push(Some(l));
             }
@@ -295,6 +303,17 @@ pub(crate) fn fmt_case_generate_construct(f: &Formatter<'_>, node: CstNode<'_>) 
                 i += 1;
             }
             "case_generate_item" | "endcase" => break,
+            // `unique`/`priority` 限定符
+            "unique_priority" => {
+                docs.push(Doc::text(c.text()));
+                docs.push(Doc::Space);
+                i += 1;
+            }
+            "inside" => {
+                docs.push(Doc::Space);
+                docs.push(Doc::text("inside"));
+                i += 1;
+            }
             _ if c.is_named() => {
                 docs.push(fmt_expr(
                     f,
@@ -303,7 +322,11 @@ pub(crate) fn fmt_case_generate_construct(f: &Formatter<'_>, node: CstNode<'_>) 
                 ));
                 i += 1;
             }
-            _ => i += 1,
+            // 其它匿名 token（如异常结构）：原样输出，绝不静默丢弃
+            _ => {
+                docs.push(Doc::text(c.text()));
+                i += 1;
+            }
         }
     }
 
@@ -380,6 +403,10 @@ fn fmt_case_generate_item(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
             } else if c.kind() == "," {
                 docs.push(Doc::text(","));
                 pending_space = true;
+            } else {
+                // 其它匿名 token（如 `default` 关键字）：原样输出，
+                // 丢掉会让 `default:` 退化成无表达式分支（语义改变）。
+                docs.push(Doc::text(c.text()));
             }
         } else if c.is_named() {
             body = Some(*c);
@@ -452,13 +479,10 @@ pub(crate) fn fmt_case_item(f: &Formatter<'_>, node: CstNode<'_>, align_width: &
         is_seq
     };
     let tw = f.cfg.tab_width as usize;
-    let mut expr_doc: Vec<Doc> = Vec::new();
-    let mut body: Option<CstNode<'_>> = None;
-    let mut body_expr = false;
+    let mut docs: Vec<Doc> = Vec::new();
+    let mut seen_colon = false;
     let mut colon_end: Option<usize> = None;
-    let mut i = 0;
-    while i < items.len() {
-        let c = items[i];
+    for c in &items {
         if c.kind() == ":" {
             // 冒号前补对齐空格（至少 1 个空格）
             let cur = display_width(&case_item_expr_text(f, node), tw);
@@ -470,38 +494,33 @@ pub(crate) fn fmt_case_item(f: &Formatter<'_>, node: CstNode<'_>, align_width: &
             } else {
                 1
             };
-            let mut pad = String::new();
             for _ in 0..pad_n {
-                pad.push(' ');
+                docs.push(Doc::Space);
             }
-            expr_doc.push(Doc::text(pad));
-            expr_doc.push(Doc::text(":"));
+            docs.push(Doc::text(":"));
             colon_end = Some(c.byte_range().end);
-            i += 1;
+            seen_colon = true;
             continue;
         }
-        if c.is_named()
-            && c.kind() != "case_item_expression"
-            && c.kind() != "expression"
-            && c.kind() != "case_item_expression_list"
-        {
-            // 冒号后的 body
-            body = Some(c);
-            body_expr = true;
-            break;
+        if !seen_colon {
+            // 表达式侧（含 `[0:3]`、`1, 2, 3`、`4'b1???` 等）：原文保留，
+            // 避免表达式路径改写 `?` / 范围语法。这样 `case ... inside` 的
+            // `case_inside_item` 也能正确输出。
+            docs.push(Doc::text(c.text()));
+            continue;
         }
-        expr_doc.push(Doc::text(c.text()));
-        i += 1;
-    }
-    // body 处理
-    let mut docs: Vec<Doc> = expr_doc;
-    if let Some(b) = body {
-        let inner = unwrap_statement(f, b);
+        if !c.is_named() {
+            // `:` 后的匿名 token（如空语句的 `;`）：原样输出
+            docs.push(Doc::text(c.text()));
+            continue;
+        }
+        // `:` 之后的首个 named 子节点即 body
+        let inner = unwrap_statement(f, *c);
         match inner.kind() {
             "seq_block" => {
                 // `:` 后的原文尾随空格（若 body 在下一行）
                 if let Some(ce) = colon_end {
-                    let ws = f.ws(ce, b.byte_range().start);
+                    let ws = f.ws(ce, c.byte_range().start);
                     if ws.contains('\n') {
                         let trailing = f.trailing_inline(ws);
                         if !trailing.is_empty() {
@@ -521,10 +540,10 @@ pub(crate) fn fmt_case_item(f: &Formatter<'_>, node: CstNode<'_>, align_width: &
             _ => {
                 // 单语句同行，或带注释
                 docs.push(Doc::Space);
-                docs.push(f.fmt(b));
+                docs.push(f.fmt(*c));
             }
         }
+        break;
     }
-    let _ = body_expr;
     Doc::concat(docs)
 }

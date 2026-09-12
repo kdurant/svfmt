@@ -270,7 +270,7 @@ begin
     begin
 
         // counter to measure frame length
-        if(& frame_len_reg == 0)
+        if(&frame_len_reg == 0)
         begin
             frame_len_next = frame_len_reg + 1;
         end
@@ -286,7 +286,7 @@ begin
         end
 
         // address and ethertype checks
-        if(& hdr_ptr_reg == 0)
+        if(&hdr_ptr_reg == 0)
         begin
             hdr_ptr_next = hdr_ptr_reg + 1;
         end
@@ -505,7 +505,7 @@ begin
             begin
                 in_frame_reg <= gmii_rx_dv;
             end
-            else if(gmii_rx_dv && {gmii_rxd[3 : 0], gmii_rxd_d0_reg[7 : 4]} == ETH_SFD)
+            else if(gmii_rx_dv && {gmii_rxd[3:0], gmii_rxd_d0_reg[7:4]} == ETH_SFD)
             begin
                 in_frame_reg         <= 1'b1;
                 start_packet_int_reg <= 1'b1;

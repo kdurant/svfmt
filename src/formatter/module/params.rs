@@ -235,6 +235,23 @@ pub(crate) fn fmt_parameter_port_list(f: &Formatter<'_>, node: CstNode<'_>) -> D
                     }
                 }
             }
+            "ERROR" => {
+                // 语法错误区（如 `#(8)` 这类 tree-sitter 严格语法不支持的参数写法）：
+                // 原样输出，避免内容静默丢失。
+                if let Some((s, e, line)) = pending.take() {
+                    events.push((true, line, s, e));
+                }
+                let next_is_comma = items
+                    .iter()
+                    .position(|c| c.byte_range().start == item.byte_range().start)
+                    .and_then(|k| items.get(k + 1))
+                    .is_some_and(|n| n.kind() == ",");
+                let mut line = item.text().trim_end().to_string();
+                if next_is_comma {
+                    line.push(',');
+                }
+                pending = Some((item.byte_range().start, item.byte_range().end, line));
+            }
             _ if item.is_named() && item.kind().ends_with("comment") => {
                 let cmt_start = item.byte_range().start;
                 if let Some((s, e, line)) = pending.take() {
@@ -300,6 +317,38 @@ pub(super) fn parameter_columns(
     f: &Formatter<'_>,
     node: CstNode<'_>,
 ) -> (String, Vec<(String, String)>) {
+    fn push_normalized(out: &mut String, text: &str) {
+        let t = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        if t.is_empty() {
+            return;
+        }
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&t);
+    }
+
+    /// `type_assignment`：`T = int` → ("T", "int")
+    fn collect_type_assigns(list: CstNode<'_>, out: &mut Vec<(String, String)>) {
+        for p in list.named_children() {
+            if p.kind() != "type_assignment" {
+                continue;
+            }
+            let mut name = String::new();
+            let mut value = String::new();
+            for t in p.children() {
+                match t.kind() {
+                    "simple_identifier" if name.is_empty() => name = t.text().to_string(),
+                    "data_type" | "data_type_or_implicit" => {
+                        push_normalized(&mut value, t.text());
+                    }
+                    _ => {}
+                }
+            }
+            out.push((name, value));
+        }
+    }
+
     fn collect_assigns(list: CstNode<'_>, out: &mut Vec<(String, String)>) {
         for p in list.named_children() {
             if p.kind() != "param_assignment" {
@@ -321,6 +370,7 @@ pub(super) fn parameter_columns(
     let items: Vec<CstNode<'_>> = node.children();
     let mut keyword = String::new();
     let mut type_str = String::new();
+    let mut type_kw = String::new();
     let mut assigns: Vec<(String, String)> = Vec::new();
     // 处理 parameter_port_declaration -> parameter_declaration 或直接的 local/parameter 声明
     for c in items {
@@ -330,6 +380,16 @@ pub(super) fn parameter_columns(
                 type_str = c.text().to_string();
             }
             "list_of_param_assignments" => collect_assigns(c, &mut assigns),
+            // `parameter type T = int`（type 参数）
+            "type_parameter_declaration" => {
+                for s in c.children() {
+                    match s.kind() {
+                        "list_of_type_assignments" => collect_type_assigns(s, &mut assigns),
+                        _ => push_normalized(&mut type_kw, s.text()),
+                    }
+                }
+            }
+            "list_of_type_assignments" => collect_type_assigns(c, &mut assigns),
             "parameter_declaration" | "local_parameter_declaration" => {
                 for s in c.children() {
                     match s.kind() {
@@ -339,6 +399,17 @@ pub(super) fn parameter_columns(
                         | "integer_vector_type"
                         | "integer_atom_type" => type_str = s.text().to_string(),
                         "list_of_param_assignments" => collect_assigns(s, &mut assigns),
+                        "type_parameter_declaration" => {
+                            for t in s.children() {
+                                match t.kind() {
+                                    "list_of_type_assignments" => {
+                                        collect_type_assigns(t, &mut assigns)
+                                    }
+                                    _ => push_normalized(&mut type_kw, t.text()),
+                                }
+                            }
+                        }
+                        "list_of_type_assignments" => collect_type_assigns(s, &mut assigns),
                         _ => {}
                     }
                 }
@@ -347,6 +418,12 @@ pub(super) fn parameter_columns(
         }
     }
     let mut prefix = keyword;
+    if !type_kw.is_empty() {
+        if !prefix.is_empty() {
+            prefix.push(' ');
+        }
+        prefix.push_str(&type_kw);
+    }
     if !type_str.is_empty() {
         // `parameter[3:0]`（无类型名直接带维度）不加空格
         if !type_str.starts_with('[') {
