@@ -397,3 +397,136 @@ endmodule
     );
     assert!(!stdout.contains("casez(a)"), "不应残留 casez: {stdout}");
 }
+
+/// 语法错误时不覆盖输入文件（防内容损失）；`--force` 才写入。
+#[test]
+fn in_place_refuses_to_overwrite_file_with_syntax_errors() {
+    let dir = temp_dir("refuse");
+    let bad = dir.join("bad.sv");
+    // `assign a = ;` 缺右值 → ERROR 节点
+    let src = "module t;\nassign a = ;\nendmodule\n";
+    std::fs::write(&bad, src).unwrap();
+
+    let out = Command::new(svfmt_bin())
+        .arg("--in-place")
+        .arg(&bad)
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "默认应拒绝覆盖并以非零退出");
+    assert_eq!(
+        std::fs::read_to_string(&bad).unwrap(),
+        src,
+        "文件内容不应被修改"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("--force"), "应提示 --force: {stderr}");
+
+    // --force 才写入
+    let out = Command::new(svfmt_bin())
+        .arg("--in-place")
+        .arg("--force")
+        .arg(&bad)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_ne!(std::fs::read_to_string(&bad).unwrap(), src, "应已写入");
+}
+
+/// `-o` 指向输入文件自身等价于就地覆盖 → 同样受保护；写到别的文件不受影响。
+#[test]
+fn output_to_other_file_is_allowed_with_syntax_errors() {
+    let dir = temp_dir("outguard");
+    let bad = dir.join("bad.sv");
+    let other = dir.join("other.sv");
+    let src = "module t;\nassign a = ;\nendmodule\n";
+    std::fs::write(&bad, src).unwrap();
+
+    // -o 指向别的文件：允许（golden 工作流即此形态）
+    let out = Command::new(svfmt_bin())
+        .arg(&bad)
+        .arg("-o")
+        .arg(&other)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(other.exists());
+
+    // -o 指向输入文件自身：拒绝
+    let out = Command::new(svfmt_bin())
+        .arg(&bad)
+        .arg("-o")
+        .arg(&bad)
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "-o 指向输入文件应被拒绝");
+    assert_eq!(std::fs::read_to_string(&bad).unwrap(), src);
+}
+
+/// CRLF 输入：默认保持 CRLF；`end_of_line` 可强制 LF/CRLF。
+#[test]
+fn end_of_line_preserve_and_override() {
+    let dir = temp_dir("eol");
+    let f = dir.join("crlf.sv");
+    let src = "module t;\r\nassign a = b;\r\nendmodule\r\n";
+    std::fs::write(&f, src).unwrap();
+
+    // 默认 preserve：输出仍为 CRLF
+    let out = Command::new(svfmt_bin()).arg(&f).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("\r\n"), "默认应保留 CRLF: {stdout:?}");
+    assert!(!stdout.replace("\r\n", "").contains('\r'), "不应有孤立 \\r");
+
+    // 强制 LF
+    let cfg = dir.join("lf.toml");
+    std::fs::write(&cfg, "end_of_line = \"lf\"\n").unwrap();
+    let out = Command::new(svfmt_bin())
+        .arg("--config")
+        .arg(&cfg)
+        .arg(&f)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!stdout.contains('\r'), "应输出纯 LF: {stdout:?}");
+
+    // 强制 CRLF（LF 输入）
+    let lf = dir.join("lf.sv");
+    std::fs::write(&lf, "module t;\nassign a = b;\nendmodule\n").unwrap();
+    let cfg = dir.join("crlf.toml");
+    std::fs::write(&cfg, "end_of_line = \"crlf\"\n").unwrap();
+    let out = Command::new(svfmt_bin())
+        .arg("--config")
+        .arg(&cfg)
+        .arg(&lf)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("\r\n"), "应输出 CRLF: {stdout:?}");
+}
+
+/// 未知配置项（含放错表的键）必须报错，而不是被静默忽略。
+#[test]
+fn unknown_config_key_is_reported() {
+    let dir = temp_dir("badcfg");
+    let cfg = dir.join("bad.toml");
+    std::fs::write(&cfg, "indent_widthd = 2\n").unwrap();
+    let f = dir.join("a.sv");
+    std::fs::write(&f, "module t;\nendmodule\n").unwrap();
+
+    let out = Command::new(svfmt_bin())
+        .arg("--config")
+        .arg(&cfg)
+        .arg(&f)
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "未知配置键应报错");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("indent_widthd"), "应指出问题键: {stderr}");
+}

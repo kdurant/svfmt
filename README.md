@@ -58,6 +58,12 @@ svfmt top.sv -o top_formatted.sv
 # 就地覆盖源文件
 svfmt top.sv --in-place
 
+# 源文件存在语法错误时，默认拒绝覆盖（防内容损失）；确需写入加 --force
+svfmt top.sv --in-place --force
+
+# 统一行结束符（默认 preserve：跟随输入，CRLF 不会被改成 LF）
+svfmt top.sv --end-of-line crlf
+
 # 批量就地格式化多个文件（shell 展开 glob）
 svfmt --in-place *.sv
 
@@ -69,6 +75,10 @@ cat top.sv | svfmt - > formatted.sv
 ```
 
 > 批量模式下：`-o` 只能配合单个输入文件；单个文件失败（如不存在）不影响其余文件，但进程以非零状态退出。
+>
+> 覆盖保护：当输出会覆盖输入文件（`--in-place`，或 `-o` 指向输入文件本身）且源码存在
+> 语法错误（ERROR/MISSING 节点）时，默认**拒绕覆盖并以非零状态退出**；加 `--force` 才能写入。
+> 写到其它文件（如 golden 工作流的 `-o out.sv`）不受影响。
 
 ## 命令行选项
 
@@ -87,6 +97,8 @@ Options:
       --config <CONFIG>  配置文件路径（TOML）
       --dump-config      打印默认配置并退出
       --cst              解析并打印 CST（调试用）
+      --fail-on-parse-error  源码有语法错误时以非零状态退出
+      --force            允许在有语法错误时覆盖输入文件
   -h, --help             Print help
   -V, --version          Print version
 ```

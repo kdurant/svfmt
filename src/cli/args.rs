@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use clap::{ArgAction, Args, Parser, Subcommand};
 
-use crate::config::{FormatterConfig, ModuleConfig, ReformatCase, SpaceConfig};
+use crate::config::{EndOfLine, FormatterConfig, ModuleConfig, ReformatCase, SpaceConfig};
 
 /// SystemVerilog Formatter。
 #[derive(Debug, Parser)]
@@ -42,6 +42,10 @@ pub struct Cli {
     /// 源码存在语法错误时仍格式化（默认）；开启后以非零状态退出
     #[arg(long, action = ArgAction::SetTrue)]
     pub fail_on_parse_error: bool,
+
+    /// 允许在源码存在语法错误时覆盖输入文件（默认拒绝，防内容损失）
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub force: bool,
 
     /// 命令行格式覆盖项（优先级：命令行 > 配置文件 > 默认值）
     #[command(flatten)]
@@ -166,6 +170,9 @@ pub struct ConfigArgs {
     /// case 分支内容相对 case 的缩进层级
     #[arg(long, value_name = "N")]
     pub case_indent_level: Option<u32>,
+    /// 输出行结束符：preserve / lf / crlf
+    #[arg(long, value_name = "EOL")]
+    pub end_of_line: Option<EndOfLine>,
 }
 
 /// 空格相关覆盖项（`--space-*`）。
@@ -308,6 +315,9 @@ impl ConfigArgs {
         }
         if let Some(v) = self.case_indent_level {
             cfg.case_indent_level = v;
+        }
+        if let Some(v) = self.end_of_line {
+            cfg.end_of_line = v;
         }
     }
 }

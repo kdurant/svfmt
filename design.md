@@ -268,6 +268,8 @@ svfmt -o file_after_format.sv file.sv
 svfmt --in-place file.sv
 svfmt --in-place *.sv            # 批量就地格式化（支持 glob）
 svfmt --in-place 'rtl/**/*.sv'   # 程序内 glob 展开
+svfmt --in-place --force file.sv # 源码有语法错误时仍覆盖（默认拒绝）
+svfmt --end-of-line crlf file.sv # 输出行结束符：preserve（默认）/ lf / crlf
 svfmt --version
 svfmt -o file_afte_format.sv file.sv
 
@@ -279,6 +281,11 @@ CLI 约定：
 - 输入文件可多个，支持 glob 模式（`*`、`?`、`[...]`）；省略或为 `-` 时从 stdin 读取。
 - `-o` 只能配合单个输入文件，与多文件同时使用时报错。
 - 批量模式下单个文件失败不影响其余文件，但进程以非零状态退出并汇总失败列表。
+- 覆盖保护：当输出会覆盖输入文件（`--in-place`，或 `-o` 指向输入文件本身）且源码存在
+  ERROR/MISSING 节点时，默认拒绝覆盖并报错，需 `--force` 才写入（输出到 stdout 或其它
+  文件不受影响）。
+- 行结束符：解析前 CRLF 归一为 LF，输出按 `end_of_line` 写回；`preserve`（默认）跟随
+  输入，不会把 CRLF 文件改成 LF。
 
 # 二十一、重要设计原则
 

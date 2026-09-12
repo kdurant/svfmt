@@ -143,6 +143,16 @@ fn format_source(
             return Err(CliError::SyntaxErrors(error_count));
         }
         eprintln!("{msg}");
+        // 会覆盖输入文件时额外把关：语法错误区的 CST 结构不可靠，写入可能造成
+        // 内容损失。`-o` 写到别的文件、以及输出到 stdout 都不受影响。
+        if let Some(f) = file
+            && overwrites_input(cli, f)
+            && !cli.force
+        {
+            return Err(CliError::RefuseOverwriteWithSyntaxErrors {
+                errors: error_count,
+            });
+        }
     }
 
     // 输出
@@ -159,6 +169,24 @@ fn format_source(
         out.flush()?;
     }
     Ok(())
+}
+
+/// 输出是否会覆盖输入文件：`--in-place`，或 `-o` 指向输入文件本身
+/// （含 `./a.sv` 与 `a.sv` 这类写法差异，按规范化路径比较）。
+fn overwrites_input(cli: &Cli, file: &Path) -> bool {
+    if cli.in_place {
+        return true;
+    }
+    let Some(out) = cli.output.as_deref() else {
+        return false;
+    };
+    if out == file {
+        return true;
+    }
+    match (out.canonicalize(), file.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
 }
 
 /// 打印源码的 CST（调试用）。
@@ -230,6 +258,10 @@ pub enum CliError {
     NotUtf8(String),
     #[error("源码存在语法错误（{0} 个 ERROR/MISSING 节点），已按要求以失败退出")]
     SyntaxErrors(usize),
+    #[error(
+        "源码存在 {errors} 个语法错误/缺失节点，已拒绝覆盖以免内容损失（确需覆盖请加 --force）"
+    )]
+    RefuseOverwriteWithSyntaxErrors { errors: usize },
     #[error("输出选项 -o 与多个输入文件冲突：-o 只能配合单个输入文件")]
     OutputWithMultipleFiles,
     #[error("glob 模式 {0} 无效: {1}")]
