@@ -76,8 +76,12 @@ pub fn fmt_module_instantiation(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     }
     // 全部实例都是空端口（`()`）且无额外子节点：压缩为一行（保持既有行为）
     // tree-sitter 不区分模块与接口，故统一按"无端口"判断。
-    // 带注释时不压缩，改走常规多行路径（注释必须显式输出）。
-    let no_extras = param_extras.is_empty() && instances.iter().all(|i| i.extras.is_empty());
+    // 带注释/ERROR 内容时不压缩，改走常规多行路径（内容必须显式输出）；
+    // 残余分隔符会被丢弃，不参与该判断（否则一次/二次格式化结果不同）。
+    let no_extras = param_extras.iter().all(|e| is_residual_separator(*e))
+        && instances
+            .iter()
+            .all(|i| i.extras.iter().all(|e| is_residual_separator(*e)));
     if no_extras && instances.iter().all(|i| i.ports.is_none() && i.has_parens) {
         return fmt_empty_port_one_line(f, &type_name, params, &instances);
     }
@@ -218,6 +222,29 @@ fn fmt_empty_port_one_line(
     }
     docs.push(Doc::text(";"));
     Doc::concat(docs)
+}
+
+/// "残余分隔符"ERROR 节点：仅由 `,`/`;` 组成（源文件自身的语法错误残留）。
+///
+/// 例如 `scheduler #(.A(1),)` 的尾随逗号——tree-sitter 将其恢复为 ERROR 节点。
+/// 这类节点不表达任何语义，原样输出会让格式化结果继续无法解析，因此**不输出**。
+/// 这是唯一的"丢弃内容"例外；除此之外 ERROR 恢复区内容一律原样保留。
+fn is_residual_separator(node: CstNode<'_>) -> bool {
+    if node.kind() != "ERROR" {
+        return false;
+    }
+    let mut seen = false;
+    for t in leaf_tokens(node) {
+        let s = t.text.trim();
+        if s.is_empty() {
+            continue;
+        }
+        if !s.chars().all(|c| c == ',' || c == ';') {
+            return false;
+        }
+        seen = true;
+    }
+    seen
 }
 
 /// 子树内是否含预处理指令或宏调用。
@@ -434,6 +461,11 @@ fn aligned_connections(
             }
             continue;
         }
+        // 残余分隔符（源自身的语法错误残留，如 `#(.A(1),)` 的尾随逗号）：
+        // 不输出——原样输出会让格式化结果继续无法解析。
+        if !item.is_conn && is_residual_separator(*c) {
+            continue;
+        }
         let r = c.byte_range();
         let dir: Option<CstNode<'_>> = if c.kind() == "text_macro_usage" {
             Some(*c)
@@ -453,8 +485,8 @@ fn aligned_connections(
             });
         }
         if pi >= parsed.len() {
-            // 连接已用尽：剩余的额外节点（如 ERROR 恢复区的尾随逗号 `#(.A(1),)`）
-            // 不静默丢弃。与上一行同行 → 续在该行尾；否则独立成行。
+            // 连接已用尽：剩余 ERROR 恢复区内容一律保留（同行则续行尾，
+            // 否则独立成行）。
             if !item.is_conn {
                 let same_line = rendered
                     .last()
@@ -636,7 +668,8 @@ fn wrapped_connections(
             continue;
         }
         if pi >= parsed.len() {
-            // 连接已用尽：剩余额外节点不静默丢弃（同行则续行尾，否则独立成行）
+            // 连接已用尽：剩余 ERROR 恢复区内容一律保留（同行则续行尾，
+            // 否则独立成行）；残余分隔符已在前面跳过。
             if !item.is_conn {
                 let same_line =
                     prev_end.is_some_and(|pe| !f.ws(pe, c.byte_range().start).contains('\n'));

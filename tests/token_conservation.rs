@@ -6,6 +6,11 @@
 //! 未结构化节点等）断言：
 //!   1. {输出叶子 token 多重集} == {源码叶子 token 多重集}
 //!   2. format(format(x)) == format(x)
+//!
+//! **唯一例外**：连接列表中的"残余分隔符"ERROR 节点（源文件自身的语法错误
+//! 残留，如 `#(.A(1),)` 的尾随逗号）不输出——原样保留会让格式化结果继续无法
+//! 解析。该类节点由 `residual_separator_is_dropped_output_parses` 单独覆盖；
+//! 其它 ERROR 恢复区内容一律原样保留，见 `error_content_is_preserved`。
 
 use svfmt::config::FormatterConfig;
 use svfmt::formatter::Formatter;
@@ -262,4 +267,35 @@ fn tokens_are_conserved_and_idempotent() {
         check(name, src);
     }
     assert!(cases.len() >= 40, "语料不应被裁剪");
+}
+
+/// 残余分隔符（源自身的语法错误残留）被丢弃，且输出不再有语法错误。
+///
+/// 这是"不得增删 token"的唯一例外：`#(.A(1),)` 的尾随逗号是 source 的语法
+/// 错误，tree-sitter 恢复成 `ERROR` 节点；保留它会让格式化结果继续无法解析
+/// （`examples/core.sv` 即此情况，其 golden 不含该逗号）。
+#[test]
+fn residual_separator_is_dropped_output_parses() {
+    let cases = [
+        "module t;\nfoo #(.A(1),) u();\nendmodule\n",
+        "module t;\nfoo u(\n    .a(1),\n);\nendmodule\n",
+    ];
+    for src in cases {
+        let out = fmt(src);
+        assert!(!out.contains(",)"), "残余逗号未丢弃: {out}");
+        let mut parser = SvParser::new().expect("grammar 应可加载");
+        let tree = parser.parse(&out).expect("解析应成功");
+        assert!(!tree.has_error(), "输出仍含语法错误: {out}");
+        assert_eq!(out, fmt(&out), "应幂等: {out}");
+    }
+}
+
+/// 非分隔符的 ERROR 恢复区内容必须原样保留（绝不丢内容）。
+#[test]
+fn error_content_is_preserved() {
+    // `.B` 缺括号：tree-sitter 恢复为 ERROR，内容必须保留
+    let src = "module t;\nfoo #(.A(1), .B) u();\nendmodule\n";
+    let out = fmt(src);
+    assert!(out.contains(".B"), "ERROR 恢复区内容被丢弃: {out}");
+    assert_eq!(out, fmt(&out), "应幂等: {out}");
 }
