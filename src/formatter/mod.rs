@@ -13,7 +13,7 @@ pub mod preprocessor;
 pub mod statements;
 pub mod tokens;
 
-use crate::config::FormatterConfig;
+use crate::config::{EndOfLine, FormatterConfig};
 use crate::document::{Doc, RenderOptions, render};
 use crate::parser::{CstNode, SvParser, collect_problem_nodes};
 
@@ -52,17 +52,40 @@ impl<'a> Formatter<'a> {
     /// 语法错误不会使格式化失败（tree-sitter 通过 ERROR/MISSING 节点恢复），
     /// 但调用方可用问题数决定是否告警或以非零状态退出（`--fail-on-parse-error`）。
     /// 计数范围与 `CstTree::has_error()` 保持一致。
+    ///
+    /// 行结束符：解析前先把 CRLF 归一为 LF——内部所有计算（缩进、空行、列宽、
+    /// 空白切片）都以 `\n` 为前提，`\r` 混入会让 token 文本与空白切片不一致；
+    /// 输出阶段再按 `end_of_line` 决定实际换行符（`preserve` 跟随输入）。
     pub fn format_source_checked(
         src: &str,
         cfg: &FormatterConfig,
     ) -> Result<(String, usize), FormatterError> {
+        let input_has_crlf = src.contains("\r\n");
+        let normalized = if input_has_crlf {
+            src.replace("\r\n", "\n")
+        } else {
+            src.to_string()
+        };
+        let src = normalized.as_str();
         let mut parser = SvParser::new()?;
         let tree = parser.parse(src)?;
         let error_count = collect_problem_nodes(tree.root_node()).len();
         let formatter = Formatter::new(cfg, src);
         let doc = formatter.fmt(tree.root_node());
         let options = RenderOptions::from(cfg);
-        Ok((render(&doc, &options), error_count))
+        let out = render(&doc, &options);
+        let out = match cfg.end_of_line {
+            EndOfLine::Lf => out,
+            EndOfLine::Crlf => out.replace('\n', "\r\n"),
+            EndOfLine::Preserve => {
+                if input_has_crlf {
+                    out.replace('\n', "\r\n")
+                } else {
+                    out
+                }
+            }
+        };
+        Ok((out, error_count))
     }
 
     // ---------- 基础工具 ----------
@@ -81,11 +104,6 @@ impl<'a> Formatter<'a> {
 
     pub fn blank(&self, n: usize) -> Doc {
         Doc::BlankLines(n)
-    }
-
-    /// 节点原文。
-    pub fn raw(&self, node: CstNode<'_>) -> Doc {
-        Doc::text(node.text())
     }
 
     /// 注释输出。
@@ -184,7 +202,7 @@ impl<'a> Formatter<'a> {
             "parameter_declaration" | "local_parameter_declaration" => {
                 declarations::fmt_parameter_declaration(self, node)
             }
-            "parameter_override" => self.raw(node),
+            "parameter_override" => self.fmt_default(node),
             "continuous_assign" => declarations::fmt_continuous_assign(self, node),
             "always_construct" | "initial_construct" | "final_construct" => {
                 statements::fmt_procedural_construct(self, node)
@@ -222,18 +240,16 @@ impl<'a> Formatter<'a> {
                 if let Some(child) = node.named_child(0) {
                     self.fmt(child)
                 } else {
-                    self.raw(node)
+                    self.fmt_default(node)
                 }
             }
             "module_instantiation" => instances::fmt_module_instantiation(self, node),
-            "parameter_value_assignment" | "list_of_port_connections" => self.raw(node),
-            "typedef_declaration" => declarations::fmt_typedef(self, node),
+            "parameter_value_assignment" | "list_of_port_connections" => self.fmt_default(node),
             "genvar_declaration" => self.fmt_default(node),
-            "attribute_instance" => self.raw(node),
+            "attribute_instance" => self.fmt_default(node),
             "blocking_assignment"
             | "nonblocking_assignment"
             | "operator_assignment"
-            | "assignment_expression"
             | "variable_assignment"
             | "net_assignment" => {
                 expressions::fmt_expr(self, node, &expressions::ExprCtx::default())
@@ -293,11 +309,11 @@ impl<'a> Formatter<'a> {
         Doc::concat(docs)
     }
 
-    /// 默认格式化：输出节点原文。
+    /// 节点原文（多行节点会剥离源码缩进，见 [`Formatter::fmt_default`]）。
     ///
-    /// 多行节点会先按节点起始列剥掉内部行的缩进，再交给渲染器按当前缩进重排。
-    /// 否则原文里的源缩进会与当前缩进叠加，使多次格式化时缩进逐轮累积
-    /// （幂等性破坏，如 `randcase` 等未结构化节点）。
+    /// 已废弃 `raw()`：它对多行节点直接用 [`Doc::text`]，而渲染器会给每个内部
+    /// 行加上当前缩进 → 缩进逐轮累积、破坏幂等性。所有原先的 `raw()` 调用点
+    /// 都改为 `fmt_default()`（单行节点两者等价）。
     pub fn fmt_default(&self, node: CstNode<'_>) -> Doc {
         let text = node.text();
         if !text.contains('\n') {
@@ -316,7 +332,7 @@ impl<'a> Formatter<'a> {
             && inner.byte_range().start == node.byte_range().start
             && inner.byte_range().end == node.byte_range().end
         {
-            return self.raw(node);
+            return self.fmt_default(node);
         }
         let mut doc = self.fmt(inner);
         // 结构语句（if/case/for/begin 等）自身不带 `;`

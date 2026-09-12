@@ -4,7 +4,7 @@ use crate::document::{Doc, render_inline};
 use crate::formatter::Formatter;
 use crate::formatter::alignment::pad_to;
 use crate::formatter::count_blank_lines;
-use crate::formatter::expressions::fmt_default;
+use crate::formatter::expressions::fmt_tokens;
 use crate::formatter::tokens::{display_width, has_newline};
 use crate::parser::CstNode;
 
@@ -186,7 +186,7 @@ pub(crate) fn fmt_parameter_port_list(f: &Formatter<'_>, node: CstNode<'_>) -> D
                     )
                 } else {
                     // 多条赋值：整条声明按 token 间隔规则归一化为一行
-                    render_inline(&fmt_default(f, *item), f.cfg)
+                    render_inline(&fmt_tokens(f, *item), f.cfg)
                 };
                 if !is_last || has_comma[idx] {
                     line.push(',');
@@ -223,7 +223,7 @@ pub(crate) fn fmt_parameter_port_list(f: &Formatter<'_>, node: CstNode<'_>) -> D
                     .is_some_and(|n| n.kind() == ",");
                 let n = assigns.len();
                 for (ai, a) in assigns.iter().enumerate() {
-                    let mut line = render_inline(&fmt_default(f, *a), f.cfg);
+                    let mut line = render_inline(&fmt_tokens(f, *a), f.cfg);
                     if ai + 1 < n || next_is_comma {
                         line.push(',');
                     }

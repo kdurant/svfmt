@@ -24,6 +24,7 @@ pub enum ReformatCase {
 
 /// 空格相关配置。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SpaceConfig {
     /// 二元运算符两侧是否加空格。
     #[serde(default = "default_true")]
@@ -80,6 +81,7 @@ impl Default for SpaceConfig {
 
 /// 模块相关配置。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ModuleConfig {
     /// 模块参数列表的左括号 `(` 是否另起一行。
     #[serde(default = "default_true")]
@@ -120,6 +122,7 @@ impl Default for ModuleConfig {
 
 /// Formatter 全局配置。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FormatterConfig {
     /// 每一级代码块的缩进空格数。
     #[serde(default = "default_indent_width")]
@@ -209,6 +212,25 @@ pub struct FormatterConfig {
     /// case 分支内容相对 case 的缩进层级。
     #[serde(default = "default_one")]
     pub case_indent_level: u32,
+
+    /// 输出行结束符。
+    #[serde(default)]
+    pub end_of_line: EndOfLine,
+}
+
+/// 输出行结束符风格。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "lowercase")]
+#[value(rename_all = "lowercase")]
+#[derive(Default)]
+pub enum EndOfLine {
+    /// 跟随输入：输入含 CRLF 则输出 CRLF，否则输出 LF（默认）。
+    #[default]
+    Preserve,
+    /// 统一为 LF（`\n`）。
+    Lf,
+    /// 统一为 CRLF（`\r\n`）。
+    Crlf,
 }
 
 fn default_indent_width() -> u32 {
@@ -262,6 +284,7 @@ impl Default for FormatterConfig {
             directives_at_line_start: true,
             reformat_case: ReformatCase::None,
             case_indent_level: 1,
+            end_of_line: EndOfLine::Preserve,
         }
     }
 }
@@ -332,5 +355,29 @@ mod tests {
         let cfg: FormatterConfig = toml::from_str(text).unwrap();
         assert_eq!(cfg.indent_width, 2);
         assert!(cfg.space.after_at);
+    }
+
+    #[test]
+    fn unknown_toplevel_key_is_rejected() {
+        // 配置项拼错时静默忽略会让用户以为生效了，必须报错（此外也防止
+        // "把顶层键写进 [module] 表"这类结构性错误）。
+        let err =
+            toml::from_str::<FormatterConfig>("indent_widthd = 2\n").expect_err("未知顶层键应报错");
+        assert!(err.to_string().contains("indent_widthd"), "{err}");
+    }
+
+    #[test]
+    fn unknown_nested_key_is_rejected() {
+        let err = toml::from_str::<FormatterConfig>("[space]\nafter_att = true\n")
+            .expect_err("未知表内键应报错");
+        assert!(err.to_string().contains("after_att"), "{err}");
+    }
+
+    #[test]
+    fn toplevel_key_in_wrong_table_is_rejected() {
+        // `indent_module_contents` 是顶层键；写进 [module] 应报错而不是被忽略。
+        let err = toml::from_str::<FormatterConfig>("[module]\nindent_module_contents = true\n")
+            .expect_err("放错表的键应报错");
+        assert!(err.to_string().contains("indent_module_contents"), "{err}");
     }
 }

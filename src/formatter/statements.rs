@@ -668,7 +668,7 @@ fn assignment_columns(node: CstNode<'_>) -> Option<(String, String, CstNode<'_>)
 pub fn fmt_loop_statement(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     let items: Vec<CstNode<'_>> = node.children();
     if items.is_empty() {
-        return f.raw(node);
+        return f.fmt_default(node);
     }
     // 头部结束位置（body 起始下标）
     let head_kw = items[0].kind();
@@ -1097,7 +1097,7 @@ pub fn fmt_task_or_function_declaration(f: &Formatter<'_>, node: CstNode<'_>) ->
         ("function_body_declaration", "endfunction")
     };
     let Some(body) = node.children().into_iter().find(|c| c.kind() == body_kind) else {
-        return f.raw(node);
+        return f.fmt_default(node);
     };
     let b_children: Vec<CstNode<'_>> = body.children();
     // 头部：到第一个括号深度为 0 的 `;` 为止（含）。其后直到 endtask/endfunction
@@ -1118,7 +1118,7 @@ pub fn fmt_task_or_function_declaration(f: &Formatter<'_>, node: CstNode<'_>) ->
         }
     }
     let Some((h_idx, h_end)) = header_end else {
-        return f.raw(node);
+        return f.fmt_default(node);
     };
     // 头：从节点起点到头部 `;`（原文，保留多行端口列表）
     let header_raw = &f.src[node.byte_range().start..h_end];

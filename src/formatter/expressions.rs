@@ -54,22 +54,16 @@ pub fn is_value_kind(kind: &str) -> bool {
             | "simple_identifier"
             | "escaped_identifier"
             | "hierarchical_identifier"
-            | "hierarchical_array_identifier"
-            | "indexed_identifier"
             | "bit_select"
-            | "indexed_range_select"
             | "constant_bit_select"
             | "concatenation"
             | "streaming_concatenation"
             | "parenthesized_expression"
             | "unary_expression"
             | "binary_expression"
-            | "ternary_expression"
             | "conditional_expression"
-            | "assignment_expression"
             | "implicit_class_handle"
             | "function_call"
-            | "system_function_call"
             | "function_subroutine_call"
             | "method_call"
             | "call"
@@ -81,7 +75,6 @@ pub fn is_value_kind(kind: &str) -> bool {
             | "packed_dimension"
             | "unpacked_dimension"
             | "select"
-            | "expression_list"
             | "event_expression"
             | "clocking_event"
             | "event_control"
@@ -89,14 +82,11 @@ pub fn is_value_kind(kind: &str) -> bool {
             | "delay_value"
             | "text_macro_usage"
             | "list_of_variable_identifiers"
-            | "list_of_net_identifiers"
             | "variable_lvalue"
             | "net_lvalue"
             | "list_of_variable_assignments"
             | "variable_assignment"
-            | "constant_expression_list"
             | "case_item_expression"
-            | "let_expression"
             | "tagged_union_expression"
             | "assignment_pattern"
             | "casting_type"
@@ -111,9 +101,6 @@ pub fn is_value_kind(kind: &str) -> bool {
             | "net_port_type"
             | "variable_port_type"
             | "type_reference"
-            | "element_select"
-            | "hierarchical_branch"
-            | "base_expression"
             | "array_manipulation_call"
             | "struct_union_member"
             | "enum_name_declaration"
@@ -126,9 +113,7 @@ pub fn is_value_kind(kind: &str) -> bool {
             | "list_of_param_assignments"
             | "param_assignment"
             | "list_of_port_connections"
-            | "list_of_parameter_assignments"
             | "struct_union"
-            | "non_default_type"
             | "constant_part_select_range"
     )
 }
@@ -403,7 +388,7 @@ fn is_unary_prefix(kind: &str) -> bool {
 }
 
 /// 通用 token 序列格式化：按间隔规则输出，未匹配规则时保留原文行内空白。
-pub fn fmt_default(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
+pub fn fmt_tokens(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     let mut docs: Vec<Doc> = Vec::new();
     let toks = leaf_tokens(node);
     let mut prev: Option<Token> = None;
@@ -412,7 +397,7 @@ pub fn fmt_default(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
         if let Some(p) = &prev {
             let sep = token_sep(f, Some(p), tok, &ctx);
             // 注意：不在 fallback（token 序列）路径发射 SoftLine。
-            // fmt_default 用于连续赋值 / net_assignment 等 fallback 上下文，
+            // fmt_tokens 用于连续赋值 / net_assignment 等 fallback 上下文，
             // 内部 SoftLine 断行会依赖原文空白（Sep::Keep），在 generate 块 /
             // ERROR 区域等脆弱位置会破坏解析结构、导致幂等性漂移
             // （见 examples/hdmi.sv）。断行只由结构化路径
@@ -456,7 +441,7 @@ pub fn fmt_expr(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
     match kind {
         "binary_expression" => fmt_binary(f, node, ctx),
         "unary_expression" => fmt_unary(f, node, ctx),
-        "ternary_expression" | "conditional_expression" => fmt_ternary(f, node, ctx),
+        "conditional_expression" => fmt_ternary(f, node, ctx),
         "concatenation" | "streaming_concatenation" => fmt_concat(f, node, ctx),
         "parenthesized_expression" => {
             let mut docs = vec![Doc::text("(")];
@@ -471,7 +456,6 @@ pub fn fmt_expr(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
         "constant_range" | "range_expression" => fmt_range(f, node, ctx),
         "select"
         | "bit_select"
-        | "indexed_range_select"
         | "constant_part_select_range"
         | "indexed_range" => {
             let inner = ExprCtx {
@@ -482,24 +466,22 @@ pub fn fmt_expr(f: &Formatter<'_>, node: CstNode<'_>, ctx: &ExprCtx) -> Doc {
         }
         "packed_dimension" | "unpacked_dimension" => fmt_dimension(f, node, ctx),
         "function_call"
-        | "system_function_call"
         | "call"
         | "system_tf_call"
         | "tf_call"
         | "subroutine_call"
         | "subroutine_call_statement"
         // `function_subroutine_call` 是 `f(...)` 的外层包装：若不走 fmt_call，
-        // 会落到 fmt_default 的 token 路径而丢失位选上下文（`i[7:0]` → `i[7 : 0]`）。
+        // 会落到 fmt_tokens 的 token 路径而丢失位选上下文（`i[7:0]` → `i[7 : 0]`）。
         | "function_subroutine_call"
         | "class_new" => fmt_call(f, node, ctx),
-        "assignment_expression"
-        | "blocking_assignment"
+        "blocking_assignment"
         | "nonblocking_assignment"
         | "operator_assignment" => fmt_assignment(f, node, ctx),
         _ if is_container_expr(kind) => fmt_children_expr(f, node, ctx),
         _ => {
             // 叶子/简单节点：按 token 序列 + 间隔规则
-            fmt_default(f, node)
+            fmt_tokens(f, node)
         }
     }
 }
@@ -517,18 +499,13 @@ fn is_container_expr(kind: &str) -> bool {
             // `if`/`while` 等的条件包装节点：需递归以保留位选上下文
             // （否则 `dec[7:0]` 会被 token 路径写成 `dec[7 : 0]`）
             | "cond_predicate"
-            | "expression_list"
-            | "constant_expression_list"
             | "list_of_arguments"
             | "case_item_expression"
-            | "case_item_expression_list"
             | "select"
             | "bit_select"
             | "constant_bit_select"
-            | "indexed_range_select"
             | "constant_part_select_range"
             | "hierarchical_identifier"
-            | "indexed_identifier"
     )
 }
 
@@ -919,7 +896,7 @@ pub fn dispatch_expr(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     if is_value_kind(node.kind()) {
         fmt_expr(f, node, &ExprCtx::default())
     } else {
-        fmt_default(f, node)
+        fmt_tokens(f, node)
     }
 }
 

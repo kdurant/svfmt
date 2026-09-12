@@ -171,7 +171,6 @@ fn is_procedural_item(node: CstNode<'_>) -> bool {
     kind.starts_with("always")
         || kind.starts_with("initial_")
         || kind.starts_with("final_")
-        || kind == "procedural_construct"
         || kind.ends_with("_construct")
 }
 
@@ -556,16 +555,13 @@ fn declaration_columns(f: &Formatter<'_>, node: CstNode<'_>) -> Vec<String> {
             || kind == "simple_identifier"
             || kind == "simple_type"
             || kind == "type_reference"
-            || kind == "variable_type"
         {
             if !type_part.is_empty() && !type_part.ends_with(' ') {
                 type_part.push(' ');
             }
             type_part.push_str(c.text());
         } else if kind == "list_of_variable_identifiers"
-            || kind == "list_of_net_identifiers"
             || kind == "variable_identifier_list"
-            || kind == "net_identifier_list"
             || kind == "list_of_variable_decl_assignments"
             || kind == "list_of_net_decl_assignments"
         {

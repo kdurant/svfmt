@@ -166,6 +166,24 @@ assign a = b;···
 assign a = b;
 ```
 
+## end_of_line
+输出行结束符风格
+
+- 默认： `preserve`
+- 可选值： `preserve`、`lf`、`crlf`
+
+解析前 CRLF 会归一为 LF（内部一切计算基于 `\n`），输出时再按本项写回，
+因此 `preserve` 不会把 CRLF 文件改成 LF（也不会反过来）。
+
+### preserve
+跟随输入：输入含 CRLF 则输出 CRLF，否则输出 LF。
+
+### lf
+统一输出 LF（`\n`）。
+
+### crlf
+统一输出 CRLF（`\r\n`）。
+
 
 # 空格
 
@@ -831,6 +849,31 @@ end
 ```
 
 ## 其他
+
+## directives_at_line_start
+预处理器指令（`` `ifdef/`else/`endif/`define `` 等）是否从行首开始（不缩进）
+
+- 默认： true
+
+### true
+```verilog
+initial
+begin
+`ifdef FOO
+    x = 1;
+`endif
+end
+```
+
+### false
+```verilog
+initial
+begin
+    `ifdef FOO
+    x = 1;
+    `endif
+end
+```
 
 ## reformat_case
 是否统一 `case`/`casez`/`casex` 风格

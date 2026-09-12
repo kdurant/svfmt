@@ -27,7 +27,7 @@ pub(crate) fn fmt_case_statement(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
             break;
         }
         match c.kind() {
-            "case_keyword" | "casez_keyword" | "casex_keyword" => {
+            "case_keyword" => {
                 let text = match f.cfg.reformat_case {
                     crate::config::ReformatCase::None => c.text(),
                     crate::config::ReformatCase::Casez => "casez",

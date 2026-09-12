@@ -45,7 +45,7 @@ pub fn fmt_module_instantiation(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                     }
                 }
             }
-            "module_instance" | "hierarchical_instance" => {
+            "hierarchical_instance" => {
                 let mut name = String::new();
                 let mut ports = None;
                 let mut has_parens = false;
@@ -314,7 +314,7 @@ fn fmt_parameter_connections(
                 .collect::<Vec<_>>()
         })
         .collect();
-    aligned_connections(f, &conns, shared_name_max, shared_value_max, 0, extras)
+    aligned_connections(f, &conns, shared_name_max, shared_value_max, extras)
 }
 
 /// 端口连接（`(...)` 内，多行对齐）。
@@ -327,7 +327,7 @@ fn fmt_port_connections(
 ) -> Doc {
     let items: Vec<CstNode<'_>> = node.children();
     let conns: Vec<CstNode<'_>> = items.iter().filter(|c| c.is_named()).copied().collect();
-    aligned_connections(f, &conns, shared_name_max, shared_value_max, 0, extras)
+    aligned_connections(f, &conns, shared_name_max, shared_value_max, extras)
 }
 
 /// 连接列表中的一项：连接本体，或挂在列表之外的额外节点（注释）。
@@ -381,7 +381,6 @@ fn aligned_connections(
     conns: &[CstNode<'_>],
     shared_name_max: usize,
     shared_value_max: usize,
-    value_pad_extra: usize,
     extras: &[CstNode<'_>],
 ) -> Doc {
     if conns.is_empty() {
@@ -415,10 +414,7 @@ fn aligned_connections(
     let single_line = !f.cfg.module.newline_per_instance_port
         || (wrap >= 1 && parsed.len() <= wrap && !has_macro);
     if f.svdbg() {
-        eprintln!(
-            "[aligned2] name_max={} value_max={} extra={}",
-            name_max, value_max, value_pad_extra
-        );
+        eprintln!("[aligned2] name_max={} value_max={}", name_max, value_max);
     }
     let mut docs: Vec<Doc> = Vec::new();
     // 连接 + 额外节点（注释）按源码位置合并，保证注释归属到正确的行
@@ -507,7 +503,7 @@ fn aligned_connections(
             continue;
         }
         let conn = &parsed[pi];
-        let mut line = conn_line_text(f, conn, align, name_max, value_max, value_pad_extra, inner);
+        let mut line = conn_line_text(f, conn, align, name_max, value_max, inner);
         // 连接值内部的注释（CST 挂在连接节点下，不经过连接列表）：显式续在行尾，
         // 否则丢失（`.a ( /* c */ 1 )`）。拼接值已原样保留内部文本，不重复追加。
         if matches!(conn.value, ConnectionValue::Normal(_)) {
@@ -548,8 +544,7 @@ fn aligned_connections(
         && parsed.iter().any(|c| match &c.form {
             ConnForm::Named(_) => match &c.value {
                 ConnectionValue::Normal(_) => {
-                    let line =
-                        conn_line_text(f, c, align, name_max, value_max, value_pad_extra, inner);
+                    let line = conn_line_text(f, c, align, name_max, value_max, inner);
                     display_width(&line, tw) > limit
                 }
                 ConnectionValue::Concat { .. } => false,
@@ -586,11 +581,12 @@ fn aligned_connections(
             }
         }
         match line.kind {
-            // 预处理指令顶格：Dedent → 行 → Indent
+            // 预处理指令顶格：[`Doc::Col0`] 只抑制本行缩进，不改变缩进层级——
+            // 此前用 `Dedent → 行 → Indent`，依赖外层缩进 > 0（Dedent 是饱和减，
+            // 层级为 0 时不平衡）
             LineKind::Macro => {
-                docs.push(Doc::Dedent);
+                docs.push(Doc::Col0);
                 docs.push(Doc::text(line.text.clone()));
-                docs.push(Doc::Indent);
             }
             _ => docs.push(Doc::text(line.text.clone())),
         }
@@ -895,7 +891,6 @@ fn conn_line_text(
     align: bool,
     name_max: usize,
     value_max: usize,
-    value_pad_extra: usize,
     inner: usize,
 ) -> String {
     let tw = f.cfg.tab_width as usize;
@@ -921,7 +916,7 @@ fn conn_line_text(
             line.push('(');
             if align {
                 line.push_str(&" ".repeat(inner));
-                line.push_str(&pad_col(&value_str, value_max + value_pad_extra, tw));
+                line.push_str(&pad_col(&value_str, value_max, tw));
                 line.push_str(&" ".repeat(inner));
             } else {
                 line.push_str(&value_str);

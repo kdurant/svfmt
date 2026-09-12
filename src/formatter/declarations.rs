@@ -3,7 +3,7 @@
 use crate::document::Doc;
 use crate::formatter::Formatter;
 use crate::formatter::alignment::pad_to;
-use crate::formatter::expressions::fmt_default;
+use crate::formatter::expressions::fmt_tokens;
 use crate::formatter::tokens::display_width;
 use crate::parser::CstNode;
 
@@ -18,7 +18,7 @@ pub fn fmt_data_declaration(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
         return Doc::text(node.text().trim_end().to_string());
     }
     // 模块体内由对齐段处理；此处用于非对齐上下文（如 seq_block 内）
-    fmt_default(f, node)
+    fmt_tokens(f, node)
 }
 
 /// parameter / localparam 声明（支持多行参数对齐）。
@@ -63,7 +63,7 @@ pub fn fmt_parameter_declaration(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
         }
     }
     if params.is_empty() {
-        return fmt_default(f, node);
+        return fmt_tokens(f, node);
     }
     let name_max = params
         .iter()
@@ -114,10 +114,5 @@ pub fn fmt_parameter_declaration(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
 
 /// continuous_assign（`assign` 语句）。
 pub fn fmt_continuous_assign(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
-    fmt_default(f, node)
-}
-
-/// typedef 声明：保持原文。
-pub fn fmt_typedef(_f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
-    Doc::text(node.text().trim_end().to_string())
+    fmt_tokens(f, node)
 }
