@@ -412,16 +412,24 @@ pub(crate) fn emit_aligned_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs:
     }
 }
 
-/// 提取节点行尾的注释文本。
-fn trailing_comment(f: &Formatter<'_>, node: CstNode<'_>) -> Option<String> {
-    let toks = leaf_tokens(node);
-    for t in &toks {
-        if t.is_comment {
-            return Some(t.text.to_string());
-        }
+/// 提取节点行尾的注释文本（对齐段用）。
+///
+/// 取节点的**最后一个**注释：声明/赋值等节点的内部注释不会被列构造器输出，
+/// 必须在这里补到行尾，否则被静默丢弃——例如 hdmi.sv 的
+/// `logic [9:0] x [N-1:0] /* verilator public_flat */ ;`（注释在 `;` 之前）。
+///
+/// `module_instantiation` 例外：其实例级/值内部/连接列表内的注释由
+/// `instances.rs` 逐条输出，这里再取一次会导致注释**重复**且对齐列不稳定
+/// （多行行文本参与列宽计算）。
+fn trailing_comment(_f: &Formatter<'_>, node: CstNode<'_>) -> Option<String> {
+    if node.kind() == "module_instantiation" {
+        return None;
     }
-    let _ = f;
-    None
+    leaf_tokens(node)
+        .iter()
+        .rev()
+        .find(|t| t.is_comment)
+        .map(|t| t.text.to_string())
 }
 
 /// 供 statements 等模块使用的行尾注释对齐。
@@ -435,7 +443,35 @@ pub fn pad_comment_pub(
     pad_comment(f, line, comment, base_indent, block_max_semi)
 }
 
+/// 块内相对对齐的行尾注释（对齐到 `max(block_max_semi + 3, comment_indent)`）。
+///
+/// 用于"输出可能被再次渲染为字符串"的路径：`case` item 体内的赋值段会被
+/// `case.rs` 先 `render_doc` 成字符串再作为文本发射，此时渲染器的绝对列不可知，
+/// 绝对列对齐（`Doc::Pad`）会在内层渲染里按错误的缩进生效、随后又被整体平移。
+/// 因此这里只做块内相对对齐——与 `case`/`if-else` 的注释对齐规则一致，
+/// 且不读取源码缩进（读源码会使同一段代码在不同缩进输入下产出不同列，
+/// 破坏幂等性：实测 42 → 40）。
+pub fn pad_comment_rel(
+    f: &Formatter<'_>,
+    line: &str,
+    comment: &str,
+    block_max_semi: usize,
+) -> String {
+    // base_indent = comment_column ⇒ 绝对项归零，仅保留块内相对项。
+    pad_comment(
+        f,
+        line,
+        comment,
+        f.cfg.comment_column as usize,
+        block_max_semi,
+    )
+}
+
 /// 行尾注释对齐：相对列 = max(comment_column - base_indent, block_max_semi + 3)。
+///
+/// 行文本可能是多行（实例化段的行由 `render_inline` 生成）：填充必须按
+/// **最后一行**的宽度计算，否则会把前面各行的宽度累加进来，得到异常列宽
+/// （此前 `);` 后出现 13 个空格、二次格式化又变成 1 个空格，即源于此）。
 fn pad_comment(
     f: &Formatter<'_>,
     line: &str,
@@ -443,53 +479,54 @@ fn pad_comment(
     base_indent: usize,
     block_max_semi: usize,
 ) -> String {
+    let tw = f.cfg.tab_width as usize;
+    let ci = f.cfg.comment_indent as usize;
     let target_rel = (f.cfg.comment_column as usize)
         .saturating_sub(base_indent)
         .max(block_max_semi + 3);
-    let base = line.trim_end().to_string();
-    let w = display_width(&base, f.cfg.tab_width as usize);
-    let mut out = base;
+    let mut out = line.trim_end().to_string();
     if !f.cfg.align_trailing_comments {
         // 关闭对齐：固定 comment_indent 空格
-        for _ in 0..f.cfg.comment_indent {
-            out.push(' ');
-        }
+        out.push_str(&" ".repeat(ci));
         out.push_str(comment);
         return out;
     }
-    if w >= target_rel {
+    let last_w = display_width(last_line(&out), tw);
+    let pad = if last_w >= target_rel {
         // 超长：按 comment_indent 空格分隔
-        for _ in 0..f.cfg.comment_indent {
-            out.push(' ');
-        }
+        ci
     } else {
-        out = pad_to(&out, target_rel, f.cfg.tab_width as usize);
-    }
+        target_rel - last_w
+    };
+    out.push_str(&" ".repeat(pad));
     out.push_str(comment);
     out
 }
 
+/// 文本的最后一行（行文本可能是多行）。
+fn last_line(s: &str) -> &str {
+    s.rsplit('\n').next().unwrap_or("")
+}
+
 /// 实例化行行尾注释对齐：对齐到最长行 + 1 空格（比声明/assign 的 +3 更紧凑）。
 fn pad_inst_comment(f: &Formatter<'_>, line: &str, comment: &str, block_max_semi: usize) -> String {
+    let tw = f.cfg.tab_width as usize;
+    let ci = f.cfg.comment_indent as usize;
     let mut out = line.trim_end().to_string();
     if !f.cfg.align_trailing_comments {
         // 关闭对齐：固定 comment_indent 空格
-        for _ in 0..f.cfg.comment_indent {
-            out.push(' ');
-        }
+        out.push_str(&" ".repeat(ci));
         out.push_str(comment);
         return out;
     }
     let target = block_max_semi + 1;
-    let w = display_width(&out, f.cfg.tab_width as usize);
-    if w >= target {
-        // 超长：按 comment_indent 空格分隔
-        for _ in 0..f.cfg.comment_indent {
-            out.push(' ');
-        }
+    let last_w = display_width(last_line(&out), tw);
+    let pad = if last_w >= target {
+        ci
     } else {
-        out = pad_to(&out, target, f.cfg.tab_width as usize);
-    }
+        target - last_w
+    };
+    out.push_str(&" ".repeat(pad));
     out.push_str(comment);
     out
 }

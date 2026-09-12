@@ -506,6 +506,8 @@ fn emit_assign_segment(
             op_col
         );
     }
+    // 行文本按块内相对列对齐（见 pad_comment_rel：输出可能被上层再次渲染为
+    // 字符串，绝对列不可知，且不能依赖源码缩进）。
     let mut lines: Vec<String> = Vec::new();
     let mut current: Option<String> = None;
     for node in seg {
@@ -517,17 +519,11 @@ fn emit_assign_segment(
                     ""
                 };
                 if !ws.contains('\n') {
-                    let base_indent = seg
-                        .first()
-                        .map(|n| n.byte_range().start)
-                        .and_then(|s| f.src[..s].rfind('\n'))
-                        .map(|pos| f.src[pos + 1..seg.first().unwrap().byte_range().start].len())
-                        .unwrap_or(0);
-                    lines.push(crate::formatter::module::pad_comment_pub(
+                    // 块内相对对齐（不读源码缩进：那会随输入变化，破坏幂等性）
+                    lines.push(crate::formatter::module::pad_comment_rel(
                         f,
                         &l,
                         node.text(),
-                        base_indent,
                         block_max_semi,
                     ));
                 } else {
@@ -782,7 +778,9 @@ pub fn fmt_par_block(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
         docs.push(Doc::text("fork"));
         idx = 1;
         if children.get(idx).is_some_and(|c| c.kind() == ":")
-            && children.get(idx + 1).is_some_and(|c| c.kind() == "simple_identifier")
+            && children
+                .get(idx + 1)
+                .is_some_and(|c| c.kind() == "simple_identifier")
         {
             docs.push(Doc::text(" : "));
             docs.push(Doc::text(children[idx + 1].text()));
@@ -804,7 +802,9 @@ pub fn fmt_par_block(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
         docs.push(Doc::text(children[ei].text()));
         // `join : label`
         if children.get(ei + 1).is_some_and(|c| c.kind() == ":")
-            && children.get(ei + 2).is_some_and(|c| c.kind() == "simple_identifier")
+            && children
+                .get(ei + 2)
+                .is_some_and(|c| c.kind() == "simple_identifier")
         {
             docs.push(Doc::text(" : "));
             docs.push(Doc::text(children[ei + 2].text()));

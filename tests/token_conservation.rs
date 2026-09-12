@@ -36,7 +36,10 @@ fn check(name: &str, src: &str) {
         "[{name}] 格式化前后 token 不一致（静默丢失或新增）\n--- 输出 ---\n{out}"
     );
     let twice = fmt(&out);
-    assert_eq!(out, twice, "[{name}] 不幂等\n--- 一次 ---\n{out}\n--- 二次 ---\n{twice}");
+    assert_eq!(
+        out, twice,
+        "[{name}] 不幂等\n--- 一次 ---\n{out}\n--- 二次 ---\n{twice}"
+    );
 }
 
 #[test]
@@ -52,12 +55,66 @@ fn tokens_are_conserved_and_idempotent() {
             "ordered_params",
             "module t;\nfoo #(8, 4) u(.a(a));\nendmodule\n",
         ),
-        ("multi_instance_empty", "module t;\nfoo a(), b();\nendmodule\n"),
+        (
+            "multi_instance_empty",
+            "module t;\nfoo a(), b();\nendmodule\n",
+        ),
         (
             "multi_instance_ports",
             "module t;\nfoo a(.x(1)), b(.y(2));\nendmodule\n",
         ),
         ("wildcard", "module t;\nfoo u(\n.*\n);\nendmodule\n"),
+        // ---- 注释布局：每种位置都不得丢失/重复，且必须幂等 ----
+        // （注释是"静默丢失"的高发区：连接列表首位、括号内、值内部、参数段、
+        //   声明内部、过程块行尾、独立行等）
+        (
+            "comment_leading_in_port_list",
+            "module t;\nfoo u(\n    // lead\n    .a(1)\n);\nendmodule\n",
+        ),
+        (
+            "comment_middle_in_port_list",
+            "module t;\nfoo u(\n    .a(1),\n    // why\n    .b(2)\n);\nendmodule\n",
+        ),
+        (
+            "comment_in_empty_parens",
+            "module t;\nfoo u( /* keep */ );\nendmodule\n",
+        ),
+        (
+            "comment_inside_conn_value",
+            "module t;\nfoo u(.a(/* c */ 1));\nendmodule\n",
+        ),
+        (
+            "comment_after_conn_inline",
+            "module t;\nfoo u(.a(1) /* c */, .b(2));\nendmodule\n",
+        ),
+        (
+            "comment_in_param_list",
+            "module t;\nfoo #(/* c */ 8) u();\nendmodule\n",
+        ),
+        (
+            "comment_after_param",
+            "module t;\nfoo #(8 /* c */) u();\nendmodule\n",
+        ),
+        (
+            "comment_inside_declaration",
+            "module t;\nlogic [9:0] x [4] /* verilator public_flat */ ;\nendmodule\n",
+        ),
+        (
+            "comment_trailing_on_decl",
+            "module t;\nlogic a; // keep\nlogic bb; // keep2\nendmodule\n",
+        ),
+        (
+            "comment_in_seq_block_assigns",
+            "module t;\ninitial begin\n  a = 1; // x\n  bbb = 2; // y\nend\nendmodule\n",
+        ),
+        (
+            "comment_in_case_item",
+            "module t;\ninitial begin\n  case (s)\n    A: x = 1; // a\n    B: y = 2; // b\n  endcase\nend\nendmodule\n",
+        ),
+        (
+            "comment_in_generate",
+            "module t;\ngenvar i;\ngenerate\n  for (i = 0; i < 2; i++) begin : g\n    // why\n    assign a[i] = 1;\n  end\nendgenerate\nendmodule\n",
+        ),
         (
             "named_ports_comment",
             "module t;\nfoo u(\n    .a(a),   // 注释\n    .bb(b)\n);\nendmodule\n",
@@ -79,7 +136,10 @@ fn tokens_are_conserved_and_idempotent() {
             "type_param",
             "module m #(parameter type T = int);\nendmodule\n",
         ),
-        ("assign_multi", "module t;\nassign a = 1, b = 2;\nendmodule\n"),
+        (
+            "assign_multi",
+            "module t;\nassign a = 1, b = 2;\nendmodule\n",
+        ),
         ("assign_delay", "module t;\nassign #1 a = b;\nendmodule\n"),
         (
             "assign_strength",
@@ -191,10 +251,7 @@ fn tokens_are_conserved_and_idempotent() {
             "randcase",
             "module t;\ninitial begin\n  randcase\n    1: a = 1;\n    2: a = 2;\n  endcase\nend\nendmodule\n",
         ),
-        (
-            "implicit_port",
-            "module t;\nfoo u(.a, .b);\nendmodule\n",
-        ),
+        ("implicit_port", "module t;\nfoo u(.a, .b);\nendmodule\n"),
         (
             "port_default_value",
             "module t (input logic a = 1'b0, output logic b);\nendmodule\n",

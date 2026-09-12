@@ -2,7 +2,7 @@
 
 use crate::document::Doc;
 use crate::formatter::expressions::{ExprCtx, fmt_expr};
-use crate::formatter::tokens::display_width;
+use crate::formatter::tokens::{display_width, leaf_tokens};
 use crate::formatter::{Formatter, count_blank_lines};
 use crate::parser::CstNode;
 
@@ -11,6 +11,12 @@ struct Instance<'t> {
     name: String,
     ports: Option<CstNode<'t>>,
     has_parens: bool,
+    /// 实例级"额外"子节点（主要是注释）：既非实例名、也非端口列表或括号。
+    ///
+    /// 必须显式输出，否则注释被静默丢弃——tree-sitter 把 `u(/* c */)` 的注释
+    /// 挂在 `hierarchical_instance` 下（空端口列表没有 `list_of_port_connections`
+    /// 节点承接），把 `u(/* c */ .a(1))` 的注释挂在端口列表**之前**。
+    extras: Vec<CstNode<'t>>,
 }
 
 /// module_instantiation。
@@ -25,15 +31,25 @@ pub fn fmt_module_instantiation(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     let items: Vec<CstNode<'_>> = node.children();
     let mut type_name = String::new();
     let mut params: Option<CstNode<'_>> = None;
+    // `parameter_value_assignment` 下、赋值列表之外的子节点（注释）
+    let mut param_extras: Vec<CstNode<'_>> = Vec::new();
     let mut instances: Vec<Instance<'_>> = Vec::new();
     for c in &items {
         match c.kind() {
             "simple_identifier" if type_name.is_empty() => type_name = c.text().to_string(),
-            "parameter_value_assignment" => params = Some(*c),
+            "parameter_value_assignment" => {
+                params = Some(*c);
+                for k in c.children() {
+                    if k.is_named() && k.kind() != "list_of_parameter_value_assignments" {
+                        param_extras.push(k);
+                    }
+                }
+            }
             "module_instance" | "hierarchical_instance" => {
                 let mut name = String::new();
                 let mut ports = None;
                 let mut has_parens = false;
+                let mut extras: Vec<CstNode<'_>> = Vec::new();
                 for k in c.children() {
                     match k.kind() {
                         "name_of_instance" | "simple_identifier" if name.is_empty() => {
@@ -41,6 +57,7 @@ pub fn fmt_module_instantiation(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                         }
                         "list_of_port_connections" => ports = Some(k),
                         "(" | ")" => has_parens = true,
+                        _ if k.is_named() => extras.push(k),
                         _ => {}
                     }
                 }
@@ -48,17 +65,20 @@ pub fn fmt_module_instantiation(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                     name,
                     ports,
                     has_parens,
+                    extras,
                 });
             }
             _ => {}
         }
     }
     if instances.is_empty() {
-        return f.raw(node);
+        return f.fmt_default(node);
     }
-    // 全部实例都是空端口（`()`）：压缩为一行（保持既有行为）
+    // 全部实例都是空端口（`()`）且无额外子节点：压缩为一行（保持既有行为）
     // tree-sitter 不区分模块与接口，故统一按"无端口"判断。
-    if instances.iter().all(|i| i.ports.is_none() && i.has_parens) {
+    // 带注释时不压缩，改走常规多行路径（注释必须显式输出）。
+    let no_extras = param_extras.is_empty() && instances.iter().all(|i| i.extras.is_empty());
+    if no_extras && instances.iter().all(|i| i.ports.is_none() && i.has_parens) {
         return fmt_empty_port_one_line(f, &type_name, params, &instances);
     }
     let tw = f.cfg.tab_width as usize;
@@ -111,6 +131,7 @@ pub fn fmt_module_instantiation(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
             p,
             shared_name_max,
             shared_value_max,
+            &param_extras,
         ));
         docs.push(Doc::Dedent);
         docs.push(Doc::Newline);
@@ -142,12 +163,29 @@ pub fn fmt_module_instantiation(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
                 pl,
                 shared_name_max,
                 shared_value_max,
+                &inst.extras,
             ));
             docs.push(Doc::Dedent);
             docs.push(Doc::Newline);
             docs.push(Doc::text(")"));
         } else if inst.has_parens {
-            docs.push(Doc::text("()"));
+            // 空端口 `()`：括号内的注释内联保留（`u(/* c */)`），避免丢失
+            docs.push(Doc::text("("));
+            let mut first = true;
+            for e in &inst.extras {
+                if !first {
+                    docs.push(Doc::Space);
+                }
+                docs.push(Doc::text(e.text().trim_end().to_string()));
+                first = false;
+            }
+            docs.push(Doc::text(")"));
+        } else {
+            // 无括号的实例（少见）：额外节点跟在实例名之后
+            for e in &inst.extras {
+                docs.push(Doc::Space);
+                docs.push(Doc::text(e.text().trim_end().to_string()));
+            }
         }
     }
     docs.push(Doc::text(";"));
@@ -182,19 +220,49 @@ fn fmt_empty_port_one_line(
     Doc::concat(docs)
 }
 
+/// 子树内是否含预处理指令或宏调用。
+///
+/// tree-sitter 会把 `` `ifdef X `` 与其后的连接合成**同一个** `named_parameter_assignment`
+/// 节点（`.D(D)` 与指令同属一个节点），逐字段解析连接会丢掉指令，因此这类项必须
+/// 整项原样输出。
+fn subtree_has_preproc(node: CstNode<'_>) -> bool {
+    if matches!(
+        node.kind(),
+        "conditional_compilation_directive"
+            | "text_macro_usage"
+            | "compiler_directive"
+            | "directive"
+    ) {
+        return true;
+    }
+    node.children_iter().any(subtree_has_preproc)
+}
+
 /// 单行连接（接口压缩）：`.name(value)` 逗号空格分隔。
+///
+/// 只遍历赋值列表本身：`parameter_value_assignment` 下的其它子节点（注释）由
+/// 调用方按位置单独输出，否则同一注释会被输出两次。
 fn fmt_inline_connections(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     let mut docs: Vec<Doc> = Vec::new();
     let mut first = true;
-    for c in node.children_iter() {
-        if c.is_named() {
-            if !first {
-                docs.push(Doc::Space);
+    for list in node
+        .children_iter()
+        .filter(|c| c.kind() == "list_of_parameter_value_assignments")
+    {
+        for c in list.children_iter() {
+            if c.is_named() {
+                if !first {
+                    docs.push(Doc::Space);
+                }
+                if subtree_has_preproc(c) {
+                    docs.push(f.fmt_default(c));
+                } else {
+                    docs.push(fmt_named_connection(f, c));
+                }
+                first = false;
+            } else if c.kind() == "," {
+                docs.push(Doc::text(","));
             }
-            docs.push(fmt_named_connection(f, c));
-            first = false;
-        } else if c.kind() == "," {
-            docs.push(Doc::text(","));
         }
     }
     Doc::concat(docs)
@@ -206,6 +274,7 @@ fn fmt_parameter_connections(
     node: CstNode<'_>,
     shared_name_max: usize,
     shared_value_max: usize,
+    extras: &[CstNode<'_>],
 ) -> Doc {
     let items: Vec<CstNode<'_>> = node.children();
     let conns: Vec<CstNode<'_>> = items
@@ -218,7 +287,7 @@ fn fmt_parameter_connections(
                 .collect::<Vec<_>>()
         })
         .collect();
-    aligned_connections(f, &conns, shared_name_max, shared_value_max, 0)
+    aligned_connections(f, &conns, shared_name_max, shared_value_max, 0, extras)
 }
 
 /// 端口连接（`(...)` 内，多行对齐）。
@@ -227,19 +296,66 @@ fn fmt_port_connections(
     node: CstNode<'_>,
     shared_name_max: usize,
     shared_value_max: usize,
+    extras: &[CstNode<'_>],
 ) -> Doc {
     let items: Vec<CstNode<'_>> = node.children();
     let conns: Vec<CstNode<'_>> = items.iter().filter(|c| c.is_named()).copied().collect();
-    aligned_connections(f, &conns, shared_name_max, shared_value_max, 0)
+    aligned_connections(f, &conns, shared_name_max, shared_value_max, 0, extras)
+}
+
+/// 连接列表中的一项：连接本体，或挂在列表之外的额外节点（注释）。
+struct ListItem<'t> {
+    node: CstNode<'t>,
+    /// 是否为连接本体（决定它是否对应 `parsed` 中的下一个元素）。
+    is_conn: bool,
+}
+
+/// 连接列表中的一行。
+struct RenderedLine {
+    text: String,
+    kind: LineKind,
+    /// 该行在源码中的起始字节（注释/指令/连接实体的起点）。
+    start: usize,
+    /// 该行在源码中的结束字节（含追加的同行注释）。
+    end: usize,
+}
+
+/// 行的种类：决定换行策略（独立注释必须独占一行，指令需顶格）。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LineKind {
+    /// 连接行：`.name(value)` / `.*` / 位置连接。
+    Conn,
+    /// 预处理指令行（顶格输出）。
+    Macro,
+    /// 源中独立成行的注释。
+    Comment,
+}
+
+/// 连接节点**内部**（值里）的注释文本。
+///
+/// 这类注释不是连接列表的子节点，`connection_parts` 不会解析它们，若不显式
+/// 收集就会随值一起被丢弃（`.a ( /* c */ 1 )`）。
+fn nested_comments(node: CstNode<'_>) -> Vec<String> {
+    leaf_tokens(node)
+        .iter()
+        .filter(|t| t.is_comment)
+        .map(|t| t.text.trim_end().to_string())
+        .collect()
 }
 
 /// 对齐的连接列表。
+///
+/// `extras` 为挂在**上层的**额外节点（主要是注释）：tree-sitter 会把
+/// `u(/* c */)`、`u(.a(1) /* c */)` 里的注释挂在 `hierarchical_instance` /
+/// `parameter_value_assignment` 下，而不是连接列表内。它们与连接一起按源码位置
+/// 排序处理，才能正确落在"行尾注释"或"独立注释行"。
 fn aligned_connections(
     f: &Formatter<'_>,
     conns: &[CstNode<'_>],
     shared_name_max: usize,
     shared_value_max: usize,
     value_pad_extra: usize,
+    extras: &[CstNode<'_>],
 ) -> Doc {
     if conns.is_empty() {
         return Doc::Nil;
@@ -278,14 +394,43 @@ fn aligned_connections(
         );
     }
     let mut docs: Vec<Doc> = Vec::new();
-    let mut rendered: Vec<(String, usize, bool, usize, usize)> = Vec::new(); // (行文本, conns 索引, 预处理指令行, 起始, 结束)
+    // 连接 + 额外节点（注释）按源码位置合并，保证注释归属到正确的行
+    let mut items: Vec<ListItem<'_>> = conns
+        .iter()
+        .map(|c| ListItem {
+            node: *c,
+            is_conn: true,
+        })
+        .collect();
+    items.extend(extras.iter().map(|c| ListItem {
+        node: *c,
+        is_conn: false,
+    }));
+    items.sort_by_key(|i| i.node.byte_range().start);
+    let mut rendered: Vec<RenderedLine> = Vec::new();
     let mut pi = 0usize;
-    for (ci, c) in conns.iter().enumerate() {
+    for item in items.iter() {
+        let c = &item.node;
         if c.is_named() && c.kind().ends_with("comment") {
-            // 行尾注释：追加到前一个连接行
-            if let Some((line, _, _, _, _)) = rendered.last_mut() {
-                line.push_str("  ");
-                line.push_str(c.text());
+            let r = c.byte_range();
+            // 与上一行同行 → 追加为行尾注释；否则独立成行。
+            // 此前无条件追加到"最后一行"：注释位于首位（无前驱行）时整条被丢弃，
+            // 位于单独一行时会被上移到前一行尾（改变注释的归属行）。
+            let same_line = rendered
+                .last()
+                .is_some_and(|prev| !f.ws(prev.end, r.start).contains('\n'));
+            if same_line {
+                let prev = rendered.last_mut().expect("same_line 已确认存在前驱行");
+                prev.text.push_str("  ");
+                prev.text.push_str(c.text());
+                prev.end = r.end;
+            } else {
+                rendered.push(RenderedLine {
+                    text: c.text().trim_end().to_string(),
+                    kind: LineKind::Comment,
+                    start: r.start,
+                    end: r.end,
+                });
             }
             continue;
         }
@@ -300,21 +445,45 @@ fn aligned_connections(
         if let Some(d) = dir {
             // 预处理指令（`ifdef/else/endif）：顶格独立行（不参与对齐，不消耗 parsed）
             let dr = d.byte_range();
-            rendered.push((d.text().trim_end().to_string(), ci, true, dr.start, dr.end));
+            rendered.push(RenderedLine {
+                text: d.text().trim_end().to_string(),
+                kind: LineKind::Macro,
+                start: dr.start,
+                end: dr.end,
+            });
         }
         if pi >= parsed.len() {
-            break;
+            // 连接已用尽：剩余的额外节点（如 ERROR 恢复区的尾随逗号 `#(.A(1),)`）
+            // 不静默丢弃。与上一行同行 → 续在该行尾；否则独立成行。
+            if !item.is_conn {
+                let same_line = rendered
+                    .last()
+                    .is_some_and(|prev| !f.ws(prev.end, r.start).contains('\n'));
+                if same_line {
+                    let prev = rendered.last_mut().expect("same_line 已确认存在前驱行");
+                    prev.text.push_str(c.text().trim_end());
+                    prev.end = r.end;
+                } else {
+                    rendered.push(RenderedLine {
+                        text: c.text().trim_end().to_string(),
+                        kind: LineKind::Comment,
+                        start: r.start,
+                        end: r.end,
+                    });
+                }
+            }
+            continue;
         }
         let conn = &parsed[pi];
-        let mut line = conn_line_text(
-            f,
-            conn,
-            align,
-            name_max,
-            value_max,
-            value_pad_extra,
-            inner,
-        );
+        let mut line = conn_line_text(f, conn, align, name_max, value_max, value_pad_extra, inner);
+        // 连接值内部的注释（CST 挂在连接节点下，不经过连接列表）：显式续在行尾，
+        // 否则丢失（`.a ( /* c */ 1 )`）。拼接值已原样保留内部文本，不重复追加。
+        if matches!(conn.value, ConnectionValue::Normal(_)) {
+            for cmt in nested_comments(*c) {
+                line.push_str("  ");
+                line.push_str(&cmt);
+            }
+        }
         let has_comma = pi + 1 < parsed.len() || c.text().trim_end().ends_with(',');
         if has_comma {
             line.push(',');
@@ -329,7 +498,12 @@ fn aligned_connections(
         } else {
             r.start
         };
-        rendered.push((line, ci, false, dir_start, r.end));
+        rendered.push(RenderedLine {
+            text: line,
+            kind: LineKind::Conn,
+            start: dir_start,
+            end: r.end,
+        });
         pi += 1;
     }
     // 超宽回退：仅基于连接本体判断（不包含行尾注释），避免注释误触发回退。
@@ -342,15 +516,8 @@ fn aligned_connections(
         && parsed.iter().any(|c| match &c.form {
             ConnForm::Named(_) => match &c.value {
                 ConnectionValue::Normal(_) => {
-                    let line = conn_line_text(
-                        f,
-                        c,
-                        align,
-                        name_max,
-                        value_max,
-                        value_pad_extra,
-                        inner,
-                    );
+                    let line =
+                        conn_line_text(f, c, align, name_max, value_max, value_pad_extra, inner);
                     display_width(&line, tw) > limit
                 }
                 ConnectionValue::Concat { .. } => false,
@@ -363,16 +530,21 @@ fn aligned_connections(
             ConnForm::Wildcard => false,
         });
     if has_concat || over_limit {
-        return wrapped_connections(f, &parsed, conns, name_max, value_max, inner);
+        return wrapped_connections(f, &parsed, &items, name_max, value_max, inner);
     }
     // 输出行，行间换行/空行（单行模式用空格分隔）
-    let mut prev_range: Option<(usize, usize)> = None;
-    for (line, ci, is_macro, start, end) in &rendered {
-        if let Some((_, pe)) = prev_range {
-            if single_line {
+    let mut prev_end: Option<usize> = None;
+    let mut prev_kind: Option<LineKind> = None;
+    for line in &rendered {
+        if let Some(pe) = prev_end {
+            // 独立注释行必须独占一行：单行模式下也不能与代码拼接，
+            // 否则 `//` 注释会吞掉其后的连接内容。
+            let force_break =
+                line.kind == LineKind::Comment || prev_kind == Some(LineKind::Comment);
+            if single_line && !force_break {
                 docs.push(Doc::Space);
             } else {
-                let ws = f.ws(pe, *start);
+                let ws = f.ws(pe, line.start);
                 let blanks = count_blank_lines(ws);
                 if blanks > 0 {
                     docs.push(Doc::BlankLines(blanks));
@@ -381,15 +553,17 @@ fn aligned_connections(
                 }
             }
         }
-        if *is_macro {
+        match line.kind {
             // 预处理指令顶格：Dedent → 行 → Indent
-            docs.push(Doc::Dedent);
-            docs.push(Doc::text(line.clone()));
-            docs.push(Doc::Indent);
-        } else {
-            docs.push(Doc::text(line.clone()));
+            LineKind::Macro => {
+                docs.push(Doc::Dedent);
+                docs.push(Doc::text(line.text.clone()));
+                docs.push(Doc::Indent);
+            }
+            _ => docs.push(Doc::text(line.text.clone())),
         }
-        prev_range = Some((*ci, *end));
+        prev_end = Some(line.end);
+        prev_kind = Some(line.kind);
     }
     Doc::concat(docs)
 }
@@ -403,7 +577,7 @@ fn aligned_connections(
 fn wrapped_connections(
     f: &Formatter<'_>,
     parsed: &[Conn],
-    conns: &[CstNode<'_>],
+    items: &[ListItem<'_>],
     name_max: usize,
     value_max: usize,
     inner: usize,
@@ -441,20 +615,44 @@ fn wrapped_connections(
     // 对齐列（value_max 列）一致。
     let close_prefix = name_max + 1 + value_max + inner;
     let mut docs: Vec<Doc> = Vec::new();
-    let mut prev_ci: Option<usize> = None;
+    let mut prev_end: Option<usize> = None;
     let mut pi = 0usize;
-    for (ci, c) in conns.iter().enumerate() {
+    for item in items.iter() {
+        let c = &item.node;
         if c.is_named() && c.kind().ends_with("comment") {
-            // 行尾注释：追加到上一个连接行
-            append_conn_comment(&mut docs, c.text());
+            let r = c.byte_range();
+            // 与前一元素同行 → 追加为该行行尾注释；否则独立成行（此前无落点时
+            // 注释会被 `append_conn_comment` 静默丢弃）。
+            let same_line = prev_end.is_some_and(|pe| !f.ws(pe, r.start).contains('\n'));
+            if same_line {
+                append_conn_comment(&mut docs, c.text());
+            } else {
+                if prev_end.is_some() {
+                    docs.push(Doc::Newline);
+                }
+                docs.push(Doc::text(c.text().trim_end().to_string()));
+            }
+            prev_end = Some(r.end);
             continue;
         }
         if pi >= parsed.len() {
-            break;
+            // 连接已用尽：剩余额外节点不静默丢弃（同行则续行尾，否则独立成行）
+            if !item.is_conn {
+                let same_line =
+                    prev_end.is_some_and(|pe| !f.ws(pe, c.byte_range().start).contains('\n'));
+                if same_line {
+                    append_conn_comment(&mut docs, c.text().trim_end());
+                } else {
+                    docs.push(Doc::Newline);
+                    docs.push(Doc::text(c.text().trim_end().to_string()));
+                }
+                prev_end = Some(c.byte_range().end);
+            }
+            continue;
         }
         let conn = &parsed[pi];
-        if let Some(pci) = prev_ci {
-            let ws = f.ws(conns[pci].byte_range().end, c.byte_range().start);
+        if let Some(pe) = prev_end {
+            let ws = f.ws(pe, c.byte_range().start);
             let blanks = count_blank_lines(ws);
             if blanks > 0 {
                 docs.push(Doc::BlankLines(blanks));
@@ -497,82 +695,82 @@ fn wrapped_connections(
                     vec![Doc::text(name.clone())]
                 } else {
                     match &conn.value {
-                ConnectionValue::Normal(doc) => {
-                    // 单行普通值：值渲染为单行、且宽度不超过 value_max（无需断行）时，
-                    // 用字符串相对对齐到 value_max（与 aligned_connections 单行路径一致）。
-                    // 相对对齐不受外层缩进影响，避免 Doc::Pad 用绝对列在模块缩进下失效。
-                    let value_str = render_doc(f, doc.clone());
-                    let single_line_ok = align
-                        && !value_str.contains('\n')
-                        && display_width(&value_str, tw) <= value_max;
-                    if single_line_ok {
-                        let mut line = pad_col(name, name_max + 1, tw);
-                        line.push('(');
-                        line.push_str(&" ".repeat(inner));
-                        line.push_str(&pad_col(&value_str, value_max, tw));
-                        line.push_str(&" ".repeat(inner));
-                        line.push(')');
-                        vec![Doc::text(line)]
-                    } else {
-                        let mut conn_docs: Vec<Doc> = Vec::new();
-                        if align {
-                            conn_docs.push(Doc::text(pad_col(name, name_max + 1, tw)));
-                        } else {
-                            conn_docs.push(Doc::text(name.clone()));
+                        ConnectionValue::Normal(doc) => {
+                            // 单行普通值：值渲染为单行、且宽度不超过 value_max（无需断行）时，
+                            // 用字符串相对对齐到 value_max（与 aligned_connections 单行路径一致）。
+                            // 相对对齐不受外层缩进影响，避免 Doc::Pad 用绝对列在模块缩进下失效。
+                            let value_str = render_doc(f, doc.clone());
+                            let single_line_ok = align
+                                && !value_str.contains('\n')
+                                && display_width(&value_str, tw) <= value_max;
+                            if single_line_ok {
+                                let mut line = pad_col(name, name_max + 1, tw);
+                                line.push('(');
+                                line.push_str(&" ".repeat(inner));
+                                line.push_str(&pad_col(&value_str, value_max, tw));
+                                line.push_str(&" ".repeat(inner));
+                                line.push(')');
+                                vec![Doc::text(line)]
+                            } else {
+                                let mut conn_docs: Vec<Doc> = Vec::new();
+                                if align {
+                                    conn_docs.push(Doc::text(pad_col(name, name_max + 1, tw)));
+                                } else {
+                                    conn_docs.push(Doc::text(name.clone()));
+                                }
+                                conn_docs.push(Doc::text("("));
+                                if align {
+                                    conn_docs.push(Doc::text(" ".repeat(inner)));
+                                }
+                                // 值：Indent 包裹使续行缩进 +1 级；值 Doc 自带 SoftLine 断行点
+                                conn_docs.push(Doc::Indent);
+                                conn_docs.push(doc.clone());
+                                conn_docs.push(Doc::Dedent);
+                                if align && effective_pad > 0 {
+                                    conn_docs.push(Doc::Pad(effective_pad));
+                                }
+                                if align {
+                                    conn_docs.push(Doc::text(" ".repeat(inner)));
+                                }
+                                conn_docs.push(Doc::text(")"));
+                                conn_docs
+                            }
                         }
-                        conn_docs.push(Doc::text("("));
-                        if align {
-                            conn_docs.push(Doc::text(" ".repeat(inner)));
-                        }
-                        // 值：Indent 包裹使续行缩进 +1 级；值 Doc 自带 SoftLine 断行点
-                        conn_docs.push(Doc::Indent);
-                        conn_docs.push(doc.clone());
-                        conn_docs.push(Doc::Dedent);
-                        if align && effective_pad > 0 {
-                            conn_docs.push(Doc::Pad(effective_pad));
-                        }
-                        if align {
-                            conn_docs.push(Doc::text(" ".repeat(inner)));
-                        }
-                        conn_docs.push(Doc::text(")"));
-                        conn_docs
-                    }
-                }
-                ConnectionValue::Concat { inner_lines } => {
-                    let mut conn_docs: Vec<Doc> = Vec::new();
-                    if align {
-                        conn_docs.push(Doc::text(pad_col(name, name_max + 1, tw)));
-                    } else {
-                        conn_docs.push(Doc::text(name.clone()));
-                    }
-                    conn_docs.push(Doc::text("("));
-                    if align {
-                        conn_docs.push(Doc::text(" ".repeat(inner)));
-                    }
-                    conn_docs.push(Doc::text("{"));
-                    // 花括号内部：原文逐行保留，统一缩进 +1 级，column_limit 不介入。
-                    conn_docs.push(Doc::Newline);
-                    conn_docs.push(Doc::Indent);
-                    for (i, line) in inner_lines.iter().enumerate() {
-                        if i > 0 {
+                        ConnectionValue::Concat { inner_lines } => {
+                            let mut conn_docs: Vec<Doc> = Vec::new();
+                            if align {
+                                conn_docs.push(Doc::text(pad_col(name, name_max + 1, tw)));
+                            } else {
+                                conn_docs.push(Doc::text(name.clone()));
+                            }
+                            conn_docs.push(Doc::text("("));
+                            if align {
+                                conn_docs.push(Doc::text(" ".repeat(inner)));
+                            }
+                            conn_docs.push(Doc::text("{"));
+                            // 花括号内部：原文逐行保留，统一缩进 +1 级，column_limit 不介入。
                             conn_docs.push(Doc::Newline);
+                            conn_docs.push(Doc::Indent);
+                            for (i, line) in inner_lines.iter().enumerate() {
+                                if i > 0 {
+                                    conn_docs.push(Doc::Newline);
+                                }
+                                conn_docs.push(Doc::text(line.clone()));
+                            }
+                            conn_docs.push(Doc::Dedent);
+                            // 闭合 `}` 另起一行，并对齐到单行连接右括号 `)` 的位置，
+                            // 使所有连接（含拼接）的右括号垂直对齐。
+                            conn_docs.push(Doc::Newline);
+                            if align {
+                                conn_docs.push(Doc::text(" ".repeat(close_prefix)));
+                                conn_docs.push(Doc::text("}"));
+                                conn_docs.push(Doc::text(" ".repeat(inner)));
+                            } else {
+                                conn_docs.push(Doc::text("}"));
+                            }
+                            conn_docs.push(Doc::text(")"));
+                            conn_docs
                         }
-                        conn_docs.push(Doc::text(line.clone()));
-                    }
-                    conn_docs.push(Doc::Dedent);
-                    // 闭合 `}` 另起一行，并对齐到单行连接右括号 `)` 的位置，
-                    // 使所有连接（含拼接）的右括号垂直对齐。
-                    conn_docs.push(Doc::Newline);
-                    if align {
-                        conn_docs.push(Doc::text(" ".repeat(close_prefix)));
-                        conn_docs.push(Doc::text("}"));
-                        conn_docs.push(Doc::text(" ".repeat(inner)));
-                    } else {
-                        conn_docs.push(Doc::text("}"));
-                    }
-                    conn_docs.push(Doc::text(")"));
-                    conn_docs
-                }
                     }
                 }
             }
@@ -582,8 +780,15 @@ fn wrapped_connections(
         if has_comma {
             final_docs.push(Doc::text(","));
         }
+        // 连接值内部的注释：显式续在行尾（拼接值已原样保留内部文本）。
+        if matches!(conn.value, ConnectionValue::Normal(_)) {
+            for cmt in nested_comments(*c) {
+                final_docs.push(Doc::text("  "));
+                final_docs.push(Doc::text(cmt));
+            }
+        }
         docs.push(Doc::concat(final_docs));
-        prev_ci = Some(ci);
+        prev_end = Some(c.byte_range().end);
         pi += 1;
     }
     Doc::concat(docs)
@@ -610,14 +815,30 @@ fn fill_last_word_width(doc: &Doc, tab_width: usize) -> usize {
 }
 
 /// 把行尾注释追加到上一个连接 Doc 的末尾。
-fn append_conn_comment(docs: &mut [Doc], comment: &str) {
-    if let Some(last) = docs.last_mut()
-        && let Doc::Group(children) = last
-        && let Some(Doc::Text(s)) = children.last_mut()
-    {
-        s.push_str("  ");
-        s.push_str(comment);
+///
+/// 落点可能是 `Doc::Text`（单元素连接）或 `Doc::Group`（多段连接）的最后一个
+/// Text；两者都覆盖。若都匹配不上（防御性），退化为空格 + 独立注释，保证注释
+/// 不会因为"找不到落点"而消失。
+fn append_conn_comment(docs: &mut Vec<Doc>, comment: &str) {
+    if let Some(last) = docs.last_mut() {
+        match last {
+            Doc::Group(children) => {
+                if let Some(Doc::Text(s)) = children.last_mut() {
+                    s.push_str("  ");
+                    s.push_str(comment);
+                    return;
+                }
+            }
+            Doc::Text(s) => {
+                s.push_str("  ");
+                s.push_str(comment);
+                return;
+            }
+            _ => {}
+        }
     }
+    docs.push(Doc::Space);
+    docs.push(Doc::text(comment.to_string()));
 }
 
 fn pad_col(text: &str, width: usize, tab_width: usize) -> String {

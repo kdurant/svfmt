@@ -188,7 +188,7 @@ begin
     else
     begin
         state         <= state_nxt;
-        axis_m_tvalid <= 0;             // default: pulse
+        axis_m_tvalid <= 0;           // default: pulse
         axis_s_tready <= 0;
 
         // Read-data pipeline (external output; skip during busy poll)
