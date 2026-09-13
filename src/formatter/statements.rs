@@ -6,7 +6,7 @@ mod control;
 use crate::document::Doc;
 use crate::formatter::Formatter;
 use crate::formatter::expressions::fmt_expr;
-use crate::formatter::tokens::{display_width, has_newline};
+use crate::formatter::tokens::{display_width, has_newline, leaf_tokens};
 use crate::parser::CstNode;
 
 // 子模块对外接口 re-export（dispatch 与跨模块引用统一经此路径）
@@ -221,7 +221,7 @@ pub fn fmt_seq_block(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
 /// ——例如 `a++;`（`inc_or_dec_expression`，无 rhs）曾被静默删除；
 /// 含 ERROR 的赋值（`a = 1, b = 2;`）则会丢 token。
 fn is_assignment_stmt(f: &Formatter<'_>, node: CstNode<'_>) -> bool {
-    assignment_columns(unwrap_statement(f, node)).is_some()
+    assignment_columns(f, unwrap_statement(f, node)).is_some()
 }
 
 /// seq_block 内语句：连续赋值对齐。
@@ -293,7 +293,20 @@ fn fmt_seq_block_body(f: &Formatter<'_>, body_nodes: &[CstNode<'_>]) -> Vec<Doc>
                 seg.push(*node);
             } else {
                 flush(&mut docs, &mut seg);
-                if !first {
+                // 同行注释（前一项非对齐输出）：保留原文行内空白，不另起一行
+                let same_line = prev_end
+                    .map(|pe| !has_newline(f.ws(pe, node.byte_range().start)))
+                    .unwrap_or(false);
+                if same_line
+                    && !docs.is_empty()
+                    && !matches!(docs.last(), Some(Doc::Newline) | Some(Doc::BlankLines(_)))
+                {
+                    let ws = f.ws(prev_end.unwrap(), node.byte_range().start);
+                    let inline = f.leading_inline(ws);
+                    if !inline.is_empty() {
+                        docs.push(Doc::text(inline.to_string()));
+                    }
+                } else if !first {
                     docs.push(Doc::Newline);
                 }
                 // 独立注释：经 fmt 分派（块注释会规整内部缩进）
@@ -334,7 +347,21 @@ fn fmt_seq_block_body(f: &Formatter<'_>, body_nodes: &[CstNode<'_>]) -> Vec<Doc>
                         docs.push(Doc::Space);
                     }
                 }
-                docs.push(f.fmt(*node));
+                // 含注释的赋值语句：原样输出（保留多行结构与注释位置，见 examples/test5.sv）
+                let inner = unwrap_statement(f, *node);
+                let is_assign_kind = matches!(
+                    inner.kind(),
+                    "blocking_assignment"
+                        | "nonblocking_assignment"
+                        | "operator_assignment"
+                        | "variable_assignment"
+                        | "net_assignment"
+                );
+                if is_assign_kind && leaf_tokens(inner).iter().any(|t| t.is_comment) {
+                    docs.push(f.fmt_default(*node));
+                } else {
+                    docs.push(f.fmt(*node));
+                }
             }
         }
         prev_end = Some(node.byte_range().end);
@@ -385,7 +412,7 @@ fn fmt_task_function_body(f: &Formatter<'_>, body_nodes: &[CstNode<'_>]) -> Vec<
             .map(|pe| crate::formatter::count_blank_lines(f.ws(pe, node.byte_range().start)) > 0)
             .unwrap_or(false);
         let inner = unwrap_statement(f, *node);
-        let is_assign = assignment_columns(inner).is_some();
+        let is_assign = assignment_columns(f, inner).is_some();
         let is_comment = node.is_named() && node.kind().ends_with("comment");
         if blank_before {
             let blanks = prev_end
@@ -404,7 +431,7 @@ fn fmt_task_function_body(f: &Formatter<'_>, body_nodes: &[CstNode<'_>]) -> Vec<
                     .rev()
                     .find(|n| !(n.is_named() && n.kind().ends_with("comment")));
                 if let Some(pl) = prev_last
-                    && assignment_columns(unwrap_statement(f, *pl)).is_none()
+                    && assignment_columns(f, unwrap_statement(f, *pl)).is_none()
                 {
                     flush(f, &mut docs, &mut seg);
                 }
@@ -415,7 +442,20 @@ fn fmt_task_function_body(f: &Formatter<'_>, body_nodes: &[CstNode<'_>]) -> Vec<
                 seg.push(*node);
             } else {
                 flush(f, &mut docs, &mut seg);
-                if !first {
+                // 同行注释（前一项非对齐输出）：保留原文行内空白，不另起一行
+                let same_line = prev_end
+                    .map(|pe| !has_newline(f.ws(pe, node.byte_range().start)))
+                    .unwrap_or(false);
+                if same_line
+                    && !docs.is_empty()
+                    && !matches!(docs.last(), Some(Doc::Newline) | Some(Doc::BlankLines(_)))
+                {
+                    let ws = f.ws(prev_end.unwrap(), node.byte_range().start);
+                    let inline = f.leading_inline(ws);
+                    if !inline.is_empty() {
+                        docs.push(Doc::text(inline.to_string()));
+                    }
+                } else if !first {
                     docs.push(Doc::Newline);
                 }
                 // 独立注释：经 fmt 分派（块注释会规整内部缩进）
@@ -467,7 +507,7 @@ fn emit_assign_segment(
             continue;
         }
         let inner = unwrap_statement(f, *node);
-        if let Some((lhs, op, rhs)) = assignment_columns(inner) {
+        if let Some((lhs, op, rhs)) = assignment_columns(f, inner) {
             let w = display_width(&lhs, tw);
             if w > max_lhs {
                 max_lhs = w;
@@ -538,7 +578,7 @@ fn emit_assign_segment(
                 lines.push(l);
             }
             let inner = unwrap_statement(f, *node);
-            if let Some((lhs, op, rhs)) = assignment_columns(inner) {
+            if let Some((lhs, op, rhs)) = assignment_columns(f, inner) {
                 let mut line = String::new();
                 let mut cell = lhs.clone();
                 if f.cfg.align_assignments {
@@ -605,12 +645,42 @@ fn prev_node_end(seg: &[CstNode<'_>], node: CstNode<'_>) -> Option<usize> {
     None
 }
 
+/// 节点内是否存在"行导向"的行注释（`//`，前后有换行）。
+///
+/// 行注释必须位于行尾，折叠会破坏注释与代码的对应关系（如多行拼接中的
+/// `// byte3, byte2\n`）。块注释（`/* ... */`）可内联/重排，不触发
+/// （如 hdmi.sv 的 `/* leading guard */`，语句仍可对齐）。
+fn has_comment_with_newline(f: &Formatter<'_>, node: CstNode<'_>) -> bool {
+    let toks = leaf_tokens(node);
+    for (i, t) in toks.iter().enumerate() {
+        if t.kind != "one_line_comment" {
+            continue;
+        }
+        if i > 0 && has_newline(f.ws(toks[i - 1].byte_range.1, t.byte_range.0)) {
+            return true;
+        }
+        if i + 1 < toks.len() && has_newline(f.ws(t.byte_range.1, toks[i + 1].byte_range.0)) {
+            return true;
+        }
+    }
+    false
+}
+
 /// 提取赋值的 lhs / op / rhs 节点。
 ///
 /// 含语法错误（ERROR）的赋值返回 `None`：ERROR 恢复出的节点结构不可靠，
 /// 按此提取会丢失 token（如 `a = 1, b = 2;` 的 `a`）。调用方据此回退到原文输出。
-fn assignment_columns(node: CstNode<'_>) -> Option<(String, String, CstNode<'_>)> {
+/// 含"行导向"注释（注释前后有换行）的赋值同样返回 `None`：折叠/重排会破坏
+/// 注释与代码的对应关系（见 examples/test5.sv 的拼接行尾注释）。
+fn assignment_columns<'a>(
+    f: &Formatter<'_>,
+    node: CstNode<'a>,
+) -> Option<(String, String, CstNode<'a>)> {
     if node.subtree_has_error() {
+        return None;
+    }
+    // 含行导向注释的赋值：不参与对齐，按原文输出（保留多行结构与注释位置）。
+    if has_comment_with_newline(f, node) {
         return None;
     }
     // blocking_assignment 内嵌 operator_assignment

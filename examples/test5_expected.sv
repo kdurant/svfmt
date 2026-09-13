@@ -187,4 +187,15 @@ end
 assign in_oob_state =
     (ROLE == 0) ? (lp_state <= HP6_AWAIT_ALIGN)          // HP1..HP5B
                 : (lp_state <= DP_AWAIT_NOCW);           // DP1..DP4
+
+function automatic void enc_reg_h2d(input sata_reg_h2d_fis_t f,
+                                      output logic [31:0] d [0:4]);
+    d[0] = {f.features_lsb, f.command,                 // byte3, byte2
+            {f.c, f.rsvd0, f.pm_port}, f.c_type};      // byte1, byte0
+    d[1] = {f.device, f.lba_lsb[23:16], f.lba_lsb[15:8], f.lba_lsb[7:0]};
+    d[2] = {f.features_msb, f.lba_msb[23:16], f.lba_msb[15:8], f.lba_msb[7:0]};
+    d[3] = {f.control, f.icc, f.count[15:8], f.count[7:0]};
+    d[4] = 32'b0;                                                                 // bytes16..19 reserved
+endfunction
+
 endmodule
