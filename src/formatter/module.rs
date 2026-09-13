@@ -143,6 +143,13 @@ fn append_body_items(f: &Formatter<'_>, docs: &mut Vec<Doc>, body: &[CstNode<'_>
                 } else {
                     docs.push(Doc::Newline);
                 }
+            } else if is_comment && seg.is_empty() {
+                // 同行注释（前一项非对齐输出）：保留原文行内空白，
+                // 避免重排破坏注释与代码的对齐（见 examples/test5.sv）。
+                let inline = f.leading_inline(ws);
+                if !inline.is_empty() {
+                    docs.push(Doc::text(inline.to_string()));
+                }
             } else {
                 docs.push(Doc::Space);
             }
@@ -176,12 +183,18 @@ fn is_procedural_item(node: CstNode<'_>) -> bool {
 
 /// `continuous_assign` 是否可参与 `=` 对齐段。
 ///
-/// 两种情况不参与：
+/// 三种情况不参与：
 /// - 多赋值（`assign a = 1, b = 2;`）：对齐段每行只能表示一条赋值，强行对齐会
 ///   只保留最后一条、静默丢失其余赋值（见 examples/test5.sv）；
-/// - 含语法错误（ERROR）的赋值：其 CST 结构不可靠，对齐会丢失 token，改为原样输出。
+/// - 含语法错误（ERROR）的赋值：其 CST 结构不可靠，对齐会丢失 token，改为原样输出；
+/// - 含注释的赋值：注释是行导向的，折叠/重排会破坏注释与代码的对应关系
+///   （见 examples/test5.sv 的三元表达式行尾注释）。
 pub(crate) fn continuous_assign_alignable(node: CstNode<'_>) -> bool {
     if node.subtree_has_error() {
+        return false;
+    }
+    // 含注释的连续赋值：不参与对齐，按原文输出（保留多行结构与注释位置）。
+    if leaf_tokens(node).iter().any(|t| t.is_comment) {
         return false;
     }
     for c in node.children_iter() {

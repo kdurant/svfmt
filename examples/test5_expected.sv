@@ -184,4 +184,7 @@ begin
     x = f(y[7:0]);
 end
 
+assign in_oob_state =
+    (ROLE == 0) ? (lp_state <= HP6_AWAIT_ALIGN)          // HP1..HP5B
+                : (lp_state <= DP_AWAIT_NOCW);           // DP1..DP4
 endmodule

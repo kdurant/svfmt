@@ -4,7 +4,7 @@ use crate::document::Doc;
 use crate::formatter::Formatter;
 use crate::formatter::alignment::pad_to;
 use crate::formatter::expressions::fmt_tokens;
-use crate::formatter::tokens::display_width;
+use crate::formatter::tokens::{display_width, leaf_tokens};
 use crate::parser::CstNode;
 
 /// data_declaration / net_declaration。
@@ -114,5 +114,10 @@ pub fn fmt_parameter_declaration(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
 
 /// continuous_assign（`assign` 语句）。
 pub fn fmt_continuous_assign(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
+    // 含注释的连续赋值：注释是行导向的，折叠会破坏注释与代码的对应关系，
+    // 原样输出（保留多行结构与注释位置，见 examples/test5.sv 的三元表达式行尾注释）。
+    if leaf_tokens(node).iter().any(|t| t.is_comment) {
+        return f.fmt_default(node);
+    }
     fmt_tokens(f, node)
 }
