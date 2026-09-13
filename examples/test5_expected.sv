@@ -189,7 +189,7 @@ assign in_oob_state =
                 : (lp_state <= DP_AWAIT_NOCW);           // DP1..DP4
 
 function automatic void enc_reg_h2d(input sata_reg_h2d_fis_t f,
-                                      output logic [31:0] d [0:4]);
+                                    output logic [31:0] d [0:4]);
     d[0] = {f.features_lsb, f.command,                 // byte3, byte2
             {f.c, f.rsvd0, f.pm_port}, f.c_type};      // byte1, byte0
     d[1] = {f.device, f.lba_lsb[23:16], f.lba_lsb[15:8], f.lba_lsb[7:0]};

@@ -7,8 +7,8 @@ int errors = 0, checks = 0;
 sata_8b10b u_enc(); // instance to call hierarchical functions
 
 function automatic void scrn(input logic [15:0] ctx,
-                               output logic [15:0] nctx,
-                               output logic [31:0] m);
+                             output logic [15:0] nctx,
+                             output logic [31:0] m);
     m    = sata_pkg::scrambler_dstep(ctx);
     nctx = m[31:16];
 endfunction

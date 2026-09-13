@@ -1201,7 +1201,9 @@ pub fn fmt_task_or_function_declaration(f: &Formatter<'_>, node: CstNode<'_>) ->
     // 头与第一个 body 元素之间的空行
     let first_start = body_items.first().map_or(h_end, |c| c.byte_range().start);
     let blanks = crate::formatter::count_blank_lines(&f.src[h_end..first_start]);
-    let mut docs = vec![Doc::text(header.to_string())];
+    // 头部多行端口列表：续行缩进规范化到 `(` 列 + 1（相对当前缩进）
+    let header = normalize_header_continuation(f, header);
+    let mut docs = vec![Doc::text(header)];
     docs.push(Doc::Newline);
     if blanks > 0 {
         docs.push(Doc::BlankLines(blanks));
@@ -1210,4 +1212,30 @@ pub fn fmt_task_or_function_declaration(f: &Formatter<'_>, node: CstNode<'_>) ->
     docs.push(Doc::Newline);
     docs.push(Doc::text(end_kind));
     Doc::concat(docs)
+}
+
+/// 规范化 task/function 头部多行端口列表的续行缩进：
+/// 续行统一缩进到第一行 `(` 列 + 1（相对函数行；renderer 的 write_indent 会补回当前缩进）。
+fn normalize_header_continuation(_f: &Formatter<'_>, header: &str) -> String {
+    let lines: Vec<&str> = header.split('\n').collect();
+    if lines.len() <= 1 {
+        return header.to_string();
+    }
+    let Some(paren_idx) = lines[0].find('(') else {
+        return header.to_string();
+    };
+    let cont_pad = paren_idx + 1;
+    let mut out = String::from(lines[0]);
+    for hline in lines.iter().skip(1) {
+        out.push('\n');
+        if hline.trim().is_empty() {
+            out.push_str(hline);
+        } else {
+            for _ in 0..cont_pad {
+                out.push(' ');
+            }
+            out.push_str(hline.trim_start());
+        }
+    }
+    out
 }
