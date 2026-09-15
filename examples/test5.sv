@@ -145,4 +145,7 @@ assign in_oob_state =
     d[4] = 32'b0;                                     // bytes16..19 reserved
   endfunction
 
+localparam IDLE_THRESH = BIT_PERIOD + BIT_PERIOD / 2;  // 1.5 bit 周期
+reg [9:0] idle_cnt;                     // 10位: 支持 BIT_PERIOD 最大 ~682 (IDLE_THRESH=1.5×BIT_PERIOD)
+
 endmodule

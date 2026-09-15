@@ -504,8 +504,8 @@ fn pad_comment(
         return out;
     }
     let last_w = display_width(last_line(&out), tw);
-    let pad = if last_w >= target_rel {
-        // 超长：按 comment_indent 空格分隔
+    let pad = if last_w + ci >= target_rel {
+        // 行已接近/超过目标列：按 comment_indent 空格分隔（对齐无意义）
         ci
     } else {
         target_rel - last_w
@@ -714,6 +714,43 @@ fn emit_eq_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs: &mut Vec<Doc>) 
         }
         left_widths.push(w);
     }
+    // 块内完整行 `;` 列（0-index）的最大值：注释对齐基准（max_left 是左列，不含 value）
+    let tab = f.cfg.tab_width as usize;
+    let mut block_max_semi = 0usize;
+    for i in 0..seg.len() {
+        if is_comment[i] {
+            continue;
+        }
+        let semi = if let Some(v) = &values[i] {
+            if v.contains('\n') {
+                // 多行 value：行尾注释对应 value 末行，基准 = 末行宽
+                let mut vw = 0usize;
+                for l in v.split('\n') {
+                    vw = display_width(l, tab);
+                }
+                vw
+            } else {
+                // ` = value;`：`;` 列 = max_left + 3 + value 宽
+                max_left + 3 + display_width(v, tab)
+            }
+        } else {
+            // 无 `=`：`;` 列 = 左列宽
+            match kinds[i] {
+                "decl" => max_type + 1 + display_width(&names[i], tab),
+                _ => {
+                    display_width(&type_dims[i], tab)
+                        + if names[i].is_empty() {
+                            0
+                        } else {
+                            1 + display_width(&names[i], tab)
+                        }
+                }
+            }
+        };
+        if semi > block_max_semi {
+            block_max_semi = semi;
+        }
+    }
     // 生成行
     let mut lines: Vec<String> = Vec::new();
     let mut current: Option<String> = None;
@@ -725,7 +762,7 @@ fn emit_eq_segment(f: &Formatter<'_>, seg: &[CstNode<'_>], docs: &mut Vec<Doc>) 
                 .unwrap_or("");
             if let Some(l) = current.take() {
                 if !ws.contains('\n') {
-                    lines.push(pad_comment(f, &l, node.text(), 0, max_left));
+                    lines.push(pad_comment(f, &l, node.text(), 0, block_max_semi));
                 } else {
                     lines.push(l);
                     lines.push(f.comment_text(*node));
