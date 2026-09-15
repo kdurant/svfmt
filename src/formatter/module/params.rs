@@ -11,6 +11,32 @@ use crate::parser::CstNode;
 use super::pad_comment;
 use super::ports::fmt_port_declarations;
 
+/// 按原文空白输出分隔：含换行则换行（保留空行），否则输出单个空格。
+///
+/// 用于模块头前导 attribute/注释与 module 关键字之间的间隔还原，避免
+/// 多项被拼到同一行（见 examples/test5.sv）。
+fn emit_gap(
+    f: &Formatter<'_>,
+    docs: &mut Vec<Doc>,
+    prev_end: usize,
+    start: usize,
+    at_line_start: &mut bool,
+) {
+    let ws = f.ws(prev_end, start);
+    if has_newline(ws) {
+        let blanks = count_blank_lines(ws);
+        if blanks > 0 {
+            docs.push(Doc::BlankLines(blanks));
+        } else {
+            docs.push(Doc::Newline);
+        }
+        *at_line_start = true;
+    } else if !ws.is_empty() {
+        docs.push(Doc::Space);
+        *at_line_start = false;
+    }
+}
+
 /// module_ansi_header / module_nonansi_header。
 pub(crate) fn fmt_module_header(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     let mut docs: Vec<Doc> = Vec::new();
@@ -18,6 +44,37 @@ pub(crate) fn fmt_module_header(f: &Formatter<'_>, node: CstNode<'_>) -> Doc {
     let mut i = 0;
     // 是否位于行首：docs 末尾是 Newline（或 docs 为空），下一输出将顶格。
     let mut at_line_start = true;
+    // 前导 attribute_instance / 注释：按原文换行结构逐项输出。
+    // 这些项在 CST 中位于 module_keyword 之前，若落到下方通用分支会与
+    // module 关键字及后续标识符无分隔粘连（见 examples/test5.sv）。
+    let mut lead_end: Option<usize> = None;
+    while i < items.len() {
+        let c = items[i];
+        let is_lead = c.kind() == "attribute_instance"
+            || (c.is_named() && c.kind().ends_with("comment"));
+        if !is_lead {
+            break;
+        }
+        if let Some(pe) = lead_end {
+            emit_gap(f, &mut docs, pe, c.byte_range().start, &mut at_line_start);
+        }
+        docs.push(f.fmt(c));
+        at_line_start = false;
+        lead_end = Some(c.byte_range().end);
+        i += 1;
+    }
+    // 前导项与 module 关键字之间的间隔也按原文（通常为换行）。
+    if let Some(pe) = lead_end
+        && i < items.len()
+    {
+        emit_gap(
+            f,
+            &mut docs,
+            pe,
+            items[i].byte_range().start,
+            &mut at_line_start,
+        );
+    }
     // module + name
     while i < items.len() {
         let c = items[i];

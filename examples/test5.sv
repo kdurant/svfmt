@@ -149,3 +149,16 @@ localparam IDLE_THRESH = BIT_PERIOD + BIT_PERIOD / 2;  // 1.5 bit 周期
 reg [9:0] idle_cnt;                     // 10位: 支持 BIT_PERIOD 最大 ~682 (IDLE_THRESH=1.5×BIT_PERIOD)
 
 endmodule
+
+(* DowngradeIPIdentifiedWarnings="yes" *)
+//***********************************Entity Declaration************************
+(* CORE_GENERATION_INFO = "sataPhy_x1,gtwizard_v3_6_10,{protocol_file=Start_from_scratch}" *)
+module sataPhy_K7_x1_exdes #
+(
+    parameter EXAMPLE_SIM_GTRESET_SPEEDUP = "TRUE"  // simulation setting for GT SecureIP model
+)
+(
+    input             soft_reset_i,
+    input  wire [0:0] drpclk_in
+);
+endmodule
