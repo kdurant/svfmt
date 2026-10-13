@@ -106,4 +106,22 @@ module tb_sata_8b10b;
     $finish;
   end
 
+
+task automatic check_high(input string name);
+    begin
+        if(sig_out !== 1'b1) $display("[FAIL] %s : sig_out should be high", name);
+        else                 $display("[PASS] %s : sig_out stays high",     name);
+    end
+endtask
+
+task automatic watch_split(input int w, input int n, output bit saw_low);
+    begin
+        saw_low = 1'b0;
+        sig_in  = 1'b0;
+        repeat(w) begin @(negedge clk); if(sig_out === 1'b0) saw_low = 1'b1; end
+        sig_in  = 1'b1;
+        repeat(n) begin @(negedge clk); if(sig_out === 1'b0) saw_low = 1'b1; end
+    end
+endtask
+
 endmodule

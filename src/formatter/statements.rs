@@ -335,8 +335,11 @@ fn fmt_seq_block_body(f: &Formatter<'_>, body_nodes: &[CstNode<'_>]) -> Vec<Doc>
                 flush(&mut docs, &mut seg);
                 if !first && !blank_before {
                     let ws = f.ws(prev_end.unwrap(), node.byte_range().start);
-                    // delay_on_same_line=false 时独立延时强制换行（不残留前导空格）
-                    if has_newline(ws) || (is_delay_stmt(f, *node) && !f.cfg.delay_on_same_line) {
+                    // 同一行上的两条语句一律拆成两行（每条语句独占一行）。
+                    // 唯一例外：`delay_on_same_line` 开启时的延时语句，它本就设计为
+                    // 与前一语句同行（见上方 adjacent_delay）；关闭时同样强制换行
+                    // （不残留前导空格）。
+                    if has_newline(ws) || !is_delay_stmt(f, *node) || !f.cfg.delay_on_same_line {
                         let blanks = crate::formatter::count_blank_lines(ws);
                         if blanks > 0 {
                             docs.push(Doc::BlankLines(blanks));
@@ -382,10 +385,14 @@ fn is_delay_stmt(f: &Formatter<'_>, node: CstNode<'_>) -> bool {
 
 /// task/function body：连续赋值对齐，其余语句保留原文（含源码缩进）。
 ///
-/// 与 `fmt_seq_block_body` 不同：非赋值语句（if/for/自增等）不重新排版，
+/// 与 `fmt_seq_block_body` 不同：非赋值语句（for/自增等）不重新排版，
 /// 而是保留源码原文与缩进（首行补源码起始列，内部行保留源码缩进），
-/// 仅对连续赋值做 `=` 对齐。这样 task/function 体内的 if 等结构不会被
-/// 拆成 begin/else 换行风格，保持用户手写布局。
+/// 仅对连续赋值做 `=` 对齐。这样 task/function 体内含 `begin`/`end` 的
+/// if 等结构不会被拆成 begin/else 换行风格，保持用户手写布局。
+///
+/// 例外：`begin`/`end` 块与不含 `begin`/`end` 的 if/else 链走结构化排版
+/// （见 [`structurable_stmt_body`]），使 if/else 后的单条语句另起一行，与块内
+/// 其他位置的 if 输出一致。
 fn fmt_task_function_body(f: &Formatter<'_>, body_nodes: &[CstNode<'_>]) -> Vec<Doc> {
     let mut docs: Vec<Doc> = Vec::new();
     let mut seg: Vec<CstNode<'_>> = Vec::new();
@@ -465,22 +472,26 @@ fn fmt_task_function_body(f: &Formatter<'_>, body_nodes: &[CstNode<'_>]) -> Vec<
             flush(f, &mut docs, &mut seg);
             if !first && !blank_before {
                 let ws = f.ws(prev_end.unwrap(), node.byte_range().start);
-                if has_newline(ws) {
-                    let blanks = crate::formatter::count_blank_lines(ws);
-                    if blanks > 0 {
-                        docs.push(Doc::BlankLines(blanks));
-                    } else {
-                        docs.push(Doc::Newline);
-                    }
+                // 与 fmt_seq_block_body 一致：同一行上的两条语句拆成两行
+                let blanks = crate::formatter::count_blank_lines(ws);
+                if blanks > 0 {
+                    docs.push(Doc::BlankLines(blanks));
                 } else {
-                    docs.push(Doc::Space);
+                    docs.push(Doc::Newline);
                 }
             }
-            // 非赋值语句/声明/注释：原文保留，与赋值段一样缩进一级，内部行由
-            // 渲染器按当前缩进统一重排。此前首行补"源码起始列"空格，会与当前
-            // 缩进叠加，嵌套时缩进逐轮漂移（且与赋值段缩进级别不一致）。
+            // 非赋值语句/声明/注释：与赋值段一样缩进一级。
+            //
+            // 默认原文保留（内部行由渲染器按当前缩进统一重排）。此前首行补
+            // "源码起始列"空格，会与当前缩进叠加，嵌套时缩进逐轮漂移（且与赋值段
+            // 缩进级别不一致）。
+            //
+            // 例外见 [`structurable_stmt_body`]：`begin`/`end` 块与不含 `begin`/`end`
+            // 的 if/else 链走结构化排版（if/else 后的语句因此另起一行，与块内其他
+            // 位置的 if 一致）；含 `begin`/`end` 的 if 链保留原文，避免把用户手写的
+            // 紧凑 `if(...) begin` / `end else` 布局拆成 begin/else 各占一行的风格。
             docs.push(Doc::Indent);
-            docs.push(f.fmt_default(*node));
+            docs.push(structurable_stmt_body(f, *node).unwrap_or_else(|| f.fmt_default(*node)));
             docs.push(Doc::Dedent);
         }
         prev_end = Some(node.byte_range().end);
@@ -488,6 +499,31 @@ fn fmt_task_function_body(f: &Formatter<'_>, body_nodes: &[CstNode<'_>]) -> Vec<
     }
     flush(f, &mut docs, &mut seg);
     docs
+}
+
+/// task/function 体内可结构化排版的语句 → 对应 [`Doc`]，其余返回 `None`
+/// （由调用方回退到原文保留）。
+///
+/// - `seq_block`（`begin`/`end` 块）：结构化排版，块内语句按常规缩进与换行；
+/// - 不含 `begin`/`end` 的 if/else 链：结构化排版，使 if/else 后的单条语句
+///   另起一行（此前会与 `if(...)` / `else` 挤在同一行）；
+/// - 其余语句（含 `begin`/`end` 的 if 链、for、声明等）：保留原文。
+///
+/// 返回的 [`Doc`] 不含外层缩进，由调用方补齐（`fmt_seq_block` 与
+/// `fmt_conditional` 均在当前缩进处输出首行）。
+fn structurable_stmt_body(f: &Formatter<'_>, node: CstNode<'_>) -> Option<Doc> {
+    let inner = unwrap_statement(f, node);
+    match inner.kind() {
+        // 经 fmt_body 分派，兼容 `begin : label` 形式
+        "seq_block" => Some(fmt_body(f, node, 0)),
+        "conditional_statement" if !subtree_has_seq_block(inner) => Some(f.fmt(node)),
+        _ => None,
+    }
+}
+
+/// 子树（含自身）中是否存在 `seq_block`。
+fn subtree_has_seq_block(node: CstNode<'_>) -> bool {
+    node.kind() == "seq_block" || node.children_iter().any(subtree_has_seq_block)
 }
 
 /// 输出赋值对齐组。
