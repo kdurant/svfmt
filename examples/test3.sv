@@ -37,7 +37,8 @@ spi_master_core_Ex01
     .axis_master     (  axis_spi_rd_data     ),
     .sclk            (  sclk                 ),
     .scs             (  scs                  ),
-    .mosi            (  sio0                 ),
+    .mosi            (  sio0                 ), 
+    .pulse_info             (  {8'd125, 8'd150}              ),  
     .miso            (  sio1                 ),
     .wp              (  sio2                 ),
     .sio3            (  sio3                 )

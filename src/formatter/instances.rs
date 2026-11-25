@@ -1068,10 +1068,12 @@ fn ordered_connection_value(f: &Formatter<'_>, node: CstNode<'_>) -> ConnectionV
     ConnectionValue::Normal(Doc::text(node.text().trim().to_string()))
 }
 
-/// 格式化连接值：若值（子）节点是花括号拼接，则提取保留原文的多行内容；
-/// 否则走常规表达式格式化。
+/// 格式化连接值：仅当花括号拼接在源码中跨多行时，提取保留原文的多行内容；
+/// 单行拼接按常规表达式格式化（内联 `{a, b}`），交由列宽逻辑决定是否折行。
 fn fmt_connection_value(f: &Formatter<'_>, node: CstNode<'_>) -> ConnectionValue {
-    if let Some(inner) = concat_inner_lines(node) {
+    if let Some(inner) = concat_inner_lines(node)
+        && inner.len() > 1
+    {
         return ConnectionValue::Concat { inner_lines: inner };
     }
     ConnectionValue::Normal(fmt_expr(f, node, &ExprCtx::default()))
@@ -1204,25 +1206,25 @@ mod tests {
         assert!(out.contains("    .ccc (  dout  )\n"), "got:\n{out}");
     }
 
-    /// 含花括号拼接端口时，普通单行值的右括号仍按共享 value_max 对齐。
-    /// 回归：此前 wrapped_connections 对普通单行值不按 value_max pad，右括号错位。
+    /// 源码中单行的花括号拼接端口保持内联，且普通值仍按共享 value_max 对齐。
     #[test]
-    fn concat_port_keeps_plain_values_aligned() {
+    fn single_line_concat_port_stays_inline() {
         let src = "module t;\nfoo u(\n.a(clk),\n.b({x, y}),\n.ccc(mem_data)\n);\nendmodule\n";
         let out = fmt_module_src(src);
         // 普通值最宽 `mem_data`=8 → value_max=8，`.a` 的 `clk`(3) pad 到 8 宽。
-        // `.a   (  clk       )`：clk 后补 5 空格 + inner 2 = 7 空格
         assert!(out.contains("    .a   (  clk       ),\n"), "got:\n{out}");
+        // 单行拼接内联输出，参与对齐。
+        assert!(out.contains("    .b   (  {x, y}    ),\n"), "got:\n{out}");
         assert!(out.contains("    .ccc (  mem_data  )\n"), "got:\n{out}");
-        // concat 的闭合 `}` 单独一行（花括号值多行排版）
-        assert!(out.contains("}  ),\n"), "got:\n{out}");
+        // 单行拼接不应被拆成多行。
+        assert!(!out.contains("}  ),\n"), "got:\n{out}");
     }
 
-    /// 含参数段时，concat 的 `}` 用共享 value_max（含参数段更宽值）对齐，
-    /// 而非端口段局部最大值。回归：此前用端口段局部 max 导致 `}` 比普通值右括号靠左。
+    /// 源码中多行的花括号拼接端口保留多行，`}` 用共享 value_max
+    /// （含参数段更宽值）对齐到普通值右括号列。
     #[test]
-    fn concat_close_brace_uses_shared_value_max_with_params() {
-        let src = "module t;\nfoo #(\n.PARAM_LONG(very_long_value_here)\n) u(\n.a(clk),\n.b({x, y})\n);\nendmodule\n";
+    fn multiline_concat_close_brace_uses_shared_value_max_with_params() {
+        let src = "module t;\nfoo #(\n.PARAM_LONG(very_long_value_here)\n) u(\n.a(clk),\n.b({\n x, y\n})\n);\nendmodule\n";
         let out = fmt_module_src(src);
         // 共享 value_max 由参数段 `very_long_value_here`(20) 决定，
         // 端口段普通值 `.a` 的 `clk` pad 到 20 宽（补 17 + inner 2 = 19 空格）。
@@ -1230,7 +1232,7 @@ mod tests {
             out.contains("    .a          (  clk                   ),\n"),
             "got:\n{out}"
         );
-        // concat `}` 对齐到普通值右括号列（`.b` 为最后一个连接，无逗号）
+        // 多行拼接的 `}` 对齐到普通值右括号列（`.b` 为最后一个连接，无逗号）。
         assert!(out.contains("}  )\n"), "got:\n{out}");
     }
 }

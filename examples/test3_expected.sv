@@ -38,6 +38,7 @@ spi_master_core_Ex01
     .sclk        (  sclk              ),
     .scs         (  scs               ),
     .mosi        (  sio0              ),
+    .pulse_info  (  {8'd125, 8'd150}  ),
     .miso        (  sio1              ),
     .wp          (  sio2              ),
     .sio3        (  sio3              )
